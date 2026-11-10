@@ -1,0 +1,139 @@
+name: Codex PR review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      final_message: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - name: Check out PR merge commit
+        uses: actions/checkout@v5
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare trusted review prompt
+        shell: bash
+        env:
+          REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$OPENAI_API_KEY" ]]; then
+            echo "::error::Configure the OPENAI_API_KEY Actions secret before running Codex review."
+            exit 1
+          fi
+          git cat-file -e "${REVIEW_BASE_SHA}^{commit}"
+          git cat-file -e "${REVIEW_HEAD_SHA}^{commit}"
+          if ! git show "${REVIEW_BASE_SHA}:.github/codex/prompts/review.md" > "$RUNNER_TEMP/codex-review.md"; then
+            echo "::error::Trusted review prompt is missing from the PR base commit. Merge the prompt into the target branch first."
+            exit 1
+          fi
+          if [[ ! -s "$RUNNER_TEMP/codex-review.md" ]]; then
+            echo "::error::Trusted review prompt is empty."
+            exit 1
+          fi
+
+      # Keep Codex last: later steps must not inherit agent-modified state.
+      - name: Run Codex static review
+        id: codex
+        uses: openai/codex-action@v1
+        env:
+          REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
+          model: gpt-6.1-sol
+          effort: low
+          prompt-file: ${{ runner.temp }}/codex-review.md
+          output-file: ${{ runner.temp }}/codex-review-output.md
+          sandbox: read-only
+          safety-strategy: drop-sudo
+
+  comment:
+    needs: review
+    if: needs.review.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Publish current review
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.review.outputs.final_message }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const report = (process.env.CODEX_FINAL_MESSAGE || '').trim();
+            if (!report) {
+              core.setFailed('Codex returned an empty report; no review comment was published.');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const reviewedSha = process.env.REVIEW_HEAD_SHA;
+            const marker = '<!-- codex-pr-review -->';
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(comment =>
+              comment.user?.type === 'Bot' &&
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.startsWith(marker)
+            );
+
+            // Recheck immediately before writing, after comment pagination.
+            const { data: pr } = await github.rest.pulls.get({
+              owner, repo, pull_number: issue_number,
+            });
+            if (pr.state !== 'open' || pr.draft || pr.head.sha !== reviewedSha) {
+              core.info('PR closed, became a draft, or changed commits; skipping stale review.');
+              return;
+            }
+
+            const limit = 12000;
+            const characters = Array.from(report);
+            const boundedReport = characters.length > limit
+              ? characters.slice(0, limit).join('') + '\n\n> 报告超过 12,000 字符，已截断。'
+              : report;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '## Codex PR 审查',
+              `审查 commit：\`${reviewedSha}\``,
+              '静态审查，未执行构建或测试。审查结果仅供参考，不代表质量保证。',
+              boundedReport,
+              `[查看 Actions 运行](${runUrl})`,
+            ].join('\n\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
