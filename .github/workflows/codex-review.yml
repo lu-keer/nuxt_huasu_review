@@ -3,137 +3,170 @@ name: Codex PR review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-
 permissions: {}
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
+env:
+  REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 jobs:
-  review:
-    if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false
+  execute:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     permissions:
       contents: read
-    outputs:
-      final_message: ${{ steps.codex.outputs.final-message }}
+    concurrency:
+      group: codex-execute-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
-      - name: Check out PR merge commit
-        uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Prepare trusted review prompt
-        shell: bash
-        env:
-          REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Export base skill and prebuild snapshot
+        id: prepare
         run: |
           set -euo pipefail
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "::error::Configure the OPENAI_API_KEY Actions secret before running Codex review."
-            exit 1
-          fi
-          git cat-file -e "${REVIEW_BASE_SHA}^{commit}"
-          git cat-file -e "${REVIEW_HEAD_SHA}^{commit}"
-          if ! git show "${REVIEW_BASE_SHA}:.github/codex/prompts/review.md" > "$RUNNER_TEMP/codex-review.md"; then
-            echo "::error::Trusted review prompt is missing from the PR base commit. Merge the prompt into the target branch first."
-            exit 1
-          fi
-          if [[ ! -s "$RUNNER_TEMP/codex-review.md" ]]; then
-            echo "::error::Trusted review prompt is empty."
-            exit 1
-          fi
-
-      # Keep Codex last: later steps must not inherit agent-modified state.
-      - name: Run Codex static review
-        id: codex
-        uses: openai/codex-action@v1
+          mkdir -p "$RUNNER_TEMP/trusted-review"
+          git archive "$REVIEW_BASE_SHA" .agents/skills/code-review | tar -x -C "$RUNNER_TEMP/trusted-review"
+          node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-review.mjs" prepare "$RUNNER_TEMP/codex-pr-review" "$GITHUB_WORKSPACE" "$REVIEW_BASE_SHA" "$REVIEW_HEAD_SHA"
+      - name: Check credential availability
+        if: steps.prepare.outputs.has_text == 'true'
         env:
-          REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HAS_CREDENTIAL: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: test "$HAS_CREDENTIAL" = true || { echo '::error::OPENAI_API_KEY is not configured.'; exit 1; }
+      - name: Call trusted code-review skill
+        if: steps.prepare.outputs.has_text == 'true'
+        id: codex
+        timeout-minutes: 33
+        uses: openai/codex-action@1d82a3dba7c7988ec71ecae1ed5b8e8db96495c5 # v1
+        env:
+          TMPDIR: ${{ runner.temp }}/codex-pr-review/runtime-tmp
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
+          codex-version: 0.167.1
+          codex-home: ${{ runner.temp }}/codex-pr-review/codex-home
+          working-directory: ${{ runner.temp }}/codex-pr-review/controller
           model: gpt-6.1-sol
           effort: low
-          prompt-file: ${{ runner.temp }}/codex-review.md
-          output-file: ${{ runner.temp }}/codex-review-output.md
-          sandbox: read-only
+          permission-profile: review-temp
           safety-strategy: drop-sudo
-
+          prompt-file: ${{ runner.temp }}/codex-pr-review/private/prompt.md
+          output-schema-file: ${{ runner.temp }}/codex-pr-review/skill/references/ci-review-result.schema.json
+          output-file: ${{ runner.temp }}/codex-pr-review/private/final.json
+      # Fixed infrastructure only after Codex; never execute checkout scripts.
+      - name: Seal allowlisted evidence
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          ACTION_OUTCOME: ${{ steps.codex.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const root = path.join(process.env.RUNNER_TEMP, 'codex-pr-review');
+            if (!fs.existsSync(path.join(root, 'private'))) {
+              core.setFailed('Trusted preparation failed; no completed review exists.'); return;
+            }
+            if (fs.existsSync(path.join(root, 'public/observer-complete'))) return;
+            fs.writeFileSync(path.join(root, 'private/outcome.json'), JSON.stringify({action: process.env.ACTION_OUTCOME}));
+            for (let i = 0; i < 40; i++) {
+              if (fs.existsSync(path.join(root, 'public/observer-complete'))) return;
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            core.setFailed('Observer did not seal evidence; review is incomplete.');
+      - name: Upload public execution evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codex-review-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/codex-pr-review/public/
+          if-no-files-found: error
+          retention-days: 7
+  review:
+    needs: execute
+    if: always() && !cancelled() && needs.execute.result != 'cancelled' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Export trusted base tools
+        run: |
+          mkdir -p "$RUNNER_TEMP/trusted-review"
+          git archive "$REVIEW_BASE_SHA" .agents/skills/code-review | tar -x -C "$RUNNER_TEMP/trusted-review"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: codex-review-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-input
+      - name: Validate runtime evidence and full report
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-review.mjs" assess "$RUNNER_TEMP/review-input" "$RUNNER_TEMP/review-report"
+      - name: Upload full report including failure diagnostics
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codex-review-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-report/
+          if-no-files-found: error
+          retention-days: 7
   comment:
-    needs: review
-    if: needs.review.result == 'success'
+    needs: [execute, review]
+    if: always() && !cancelled() && needs.execute.result != 'cancelled' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       issues: write
       pull-requests: write
+    concurrency:
+      group: codex-publish-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
-      - name: Publish current review
-        uses: actions/github-script@v7
-        env:
-          CODEX_FINAL_MESSAGE: ${{ needs.review.outputs.final_message }}
-          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          github-token: ${{ github.token }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Export trusted publisher
+        run: |
+          mkdir -p "$RUNNER_TEMP/trusted-review"
+          git archive "$REVIEW_BASE_SHA" .agents/skills/code-review | tar -x -C "$RUNNER_TEMP/trusted-review"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: codex-review-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/review-report
+      - name: Publish current head using trusted skill publisher
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          REPORT_ARTIFACT_URL: ${{ needs.review.outputs.artifact_url }}
+        with:
           script: |
-            const report = (process.env.CODEX_FINAL_MESSAGE || '').trim();
-            if (!report) {
-              core.setFailed('Codex returned an empty report; no review comment was published.');
-              return;
-            }
-
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-            const reviewedSha = process.env.REVIEW_HEAD_SHA;
-            const marker = '<!-- codex-pr-review -->';
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner, repo, issue_number, per_page: 100,
-            });
-            const existing = comments.find(comment =>
-              comment.user?.type === 'Bot' &&
-              comment.user?.login === 'github-actions[bot]' &&
-              comment.body?.startsWith(marker)
-            );
-
-            // Recheck immediately before writing, after comment pagination.
-            const { data: pr } = await github.rest.pulls.get({
-              owner, repo, pull_number: issue_number,
-            });
-            if (pr.state !== 'open' || pr.draft || pr.head.sha !== reviewedSha) {
-              core.info('PR closed, became a draft, or changed commits; skipping stale review.');
-              return;
-            }
-
-            const limit = 12000;
-            const characters = Array.from(report);
-            const boundedReport = characters.length > limit
-              ? characters.slice(0, limit).join('') + '\n\n> 报告超过 12,000 字符，已截断。'
-              : report;
-            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
-            const body = [
-              marker,
-              '## Codex PR 审查',
-              `审查 commit：\`${reviewedSha}\``,
-              '静态审查，未执行构建或测试。审查结果仅供参考，不代表质量保证。',
-              boundedReport,
-              `[查看 Actions 运行](${runUrl})`,
-            ].join('\n\n');
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner, repo, comment_id: existing.id, body,
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const trusted = path.join(process.env.RUNNER_TEMP, 'trusted-review/.agents/skills/code-review/scripts/ci-review.mjs');
+            const { assessReview, publish } = await import(pathToFileURL(trusted).href);
+            const dir = path.join(process.env.RUNNER_TEMP, 'review-report');
+            if (!fs.existsSync(path.join(dir, 'result.json')) || !fs.existsSync(path.join(dir, 'report.md'))) {
+              assessReview(path.join(process.env.RUNNER_TEMP, 'missing-evidence'), dir, {
+                base: process.env.REVIEW_BASE_SHA, head: process.env.REVIEW_HEAD_SHA,
+                run: String(context.runId), attempt: process.env.GITHUB_RUN_ATTEMPT,
               });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
+            const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+            const report = fs.readFileSync(path.join(dir, 'report.md'), 'utf8');
+            if (result.head !== process.env.REVIEW_HEAD_SHA || result.base !== process.env.REVIEW_BASE_SHA ||
+                String(result.run) !== String(context.runId) || String(result.attempt) !== process.env.GITHUB_RUN_ATTEMPT) {
+              core.setFailed('Report identity mismatch; refusing publication.'); return;
+            }
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            core.info(await publish(github, context, result, report, process.env.REPORT_ARTIFACT_URL || runUrl));
