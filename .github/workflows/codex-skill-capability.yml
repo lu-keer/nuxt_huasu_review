@@ -1,0 +1,197 @@
+name: Codex skill capability probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-skill-capability-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare isolated probe and evidence observer
+        run: node .agents/skills/code-review/scripts/ci-capability.mjs prepare "$RUNNER_TEMP/codex-skill-capability" probe
+      - name: Check credential availability
+        env:
+          CAPABILITY_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "$CAPABILITY_API_KEY" ]]; then
+            echo '::error::OPENAI_API_KEY is not configured; no model call was made.'
+            exit 1
+          fi
+      - name: Probe native Codex capabilities
+        id: codex
+        uses: openai/codex-action@1d82a3dba7c7988ec71ecae1ed5b8e8db96495c5 # v1
+        env:
+          TMPDIR: ${{ runner.temp }}/codex-skill-capability/runtime-tmp
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
+          codex-version: 0.167.1
+          codex-home: ${{ runner.temp }}/codex-skill-capability/codex-home
+          working-directory: ${{ runner.temp }}/codex-skill-capability/fixture
+          model: gpt-6.1-sol
+          effort: low
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt-file: ${{ runner.temp }}/codex-skill-capability/private/prompt.md
+          output-schema-file: ${{ runner.temp }}/codex-skill-capability/skill/references/ci-capability-result.schema.json
+          output-file: ${{ runner.temp }}/codex-skill-capability/private/final.json
+      # Infrastructure only after Codex. Never execute checkout scripts here.
+      - name: Seal allowlisted evidence
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          CAPABILITY_ACTION_OUTCOME: ${{ steps.codex.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const root = path.join(process.env.RUNNER_TEMP, 'codex-skill-capability');
+            if (!fs.existsSync(path.join(root, 'private'))) {
+              core.warning('Preparation failed; no observer evidence is available.');
+              return;
+            }
+            fs.writeFileSync(path.join(root, 'private/outcome.json'), JSON.stringify({action: process.env.CAPABILITY_ACTION_OUTCOME}));
+            for (let i = 0; i < 40; i++) {
+              if (fs.existsSync(path.join(root, 'public/observer-complete'))) return;
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            core.setFailed('Observer did not seal evidence; capability remains unverified.');
+      - name: Upload public evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capability-probe
+          path: ${{ runner.temp }}/codex-skill-capability/public/
+          if-no-files-found: error
+          retention-days: 7
+
+  assess-probe:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      native_ready: ${{ steps.assess.outputs.native_ready }}
+      rehearsal_mode: ${{ steps.assess.outputs.rehearsal_mode }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          pattern: capability-probe
+          path: ${{ runner.temp }}/capability-input
+      - name: Decide from runtime evidence
+        id: assess
+        run: node .agents/skills/code-review/scripts/ci-capability.mjs summarize "$RUNNER_TEMP/capability-input" "$RUNNER_TEMP/probe-assessment"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capability-probe-assessment
+          path: ${{ runner.temp }}/probe-assessment/
+          retention-days: 7
+
+  rehearsal:
+    needs: assess-probe
+    if: needs.assess-probe.outputs.native_ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare separate rehearsal and observer
+        env:
+          CAPABILITY_MODE: ${{ needs.assess-probe.outputs.rehearsal_mode }}
+        run: node .agents/skills/code-review/scripts/ci-capability.mjs prepare "$RUNNER_TEMP/codex-skill-capability" "$CAPABILITY_MODE"
+      - name: Exercise skill in the validated mode
+        id: codex
+        uses: openai/codex-action@1d82a3dba7c7988ec71ecae1ed5b8e8db96495c5 # v1
+        env:
+          TMPDIR: ${{ runner.temp }}/codex-skill-capability/runtime-tmp
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
+          codex-version: 0.167.1
+          codex-home: ${{ runner.temp }}/codex-skill-capability/codex-home
+          working-directory: ${{ runner.temp }}/codex-skill-capability/fixture
+          model: gpt-6.1-sol
+          effort: low
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt-file: ${{ runner.temp }}/codex-skill-capability/private/prompt.md
+          output-schema-file: ${{ runner.temp }}/codex-skill-capability/skill/references/ci-capability-result.schema.json
+          output-file: ${{ runner.temp }}/codex-skill-capability/private/final.json
+      - name: Seal allowlisted evidence
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          CAPABILITY_ACTION_OUTCOME: ${{ steps.codex.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const root = path.join(process.env.RUNNER_TEMP, 'codex-skill-capability');
+            if (!fs.existsSync(path.join(root, 'private'))) {
+              core.warning('Preparation failed; no observer evidence is available.');
+              return;
+            }
+            fs.writeFileSync(path.join(root, 'private/outcome.json'), JSON.stringify({action: process.env.CAPABILITY_ACTION_OUTCOME}));
+            for (let i = 0; i < 40; i++) {
+              if (fs.existsSync(path.join(root, 'public/observer-complete'))) return;
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            core.setFailed('Observer did not seal evidence; capability remains unverified.');
+      - name: Upload public evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capability-rehearsal
+          path: ${{ runner.temp }}/codex-skill-capability/public/
+          if-no-files-found: error
+          retention-days: 7
+
+  report:
+    needs: [probe, assess-probe, rehearsal]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          pattern: capability-*
+          path: ${{ runner.temp }}/capability-input
+      - name: Summarize evidence without executing report content
+        run: node .agents/skills/code-review/scripts/ci-capability.mjs summarize "$RUNNER_TEMP/capability-input" "$RUNNER_TEMP/capability-report"
+      - name: Record workflow outcomes
+        env:
+          PROBE_RESULT: ${{ needs.probe.result }}
+          ASSESS_RESULT: ${{ needs.assess-probe.result }}
+          REHEARSAL_RESULT: ${{ needs.rehearsal.result }}
+        run: |
+          printf '\nWorkflow jobs: probe=%s, assess=%s, rehearsal=%s\n' "$PROBE_RESULT" "$ASSESS_RESULT" "$REHEARSAL_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nActions run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: capability-report
+          path: ${{ runner.temp }}/capability-report/
+          retention-days: 7
