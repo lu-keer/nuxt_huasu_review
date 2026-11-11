@@ -244,7 +244,21 @@ Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action
 - 已实现：手动触发、独立 fixture、原版 helper 复用、运行事件投影、六路门槛、取消证据判定、prepared 演练分支、长报告完整性校验及独立汇总。
 - 本地检查：新增 Node 测试覆盖无密钥/失败 outcome、缺失终态、模型继承证据缺失、材料摘要缺失、权限失败、长报告截断、日志字段过滤及真实 fixture 快照；测试是本地模拟和 helper 验证，不是云端成功证据。
 - 检查记录：新增测试与 actionlint 工作流校验已通过；扩展运行原有测试时共有 8 项失败，涉及 Windows 特殊文件名、符号链接权限、Git shell 模拟及 CRLF frontmatter 匹配。原有相关文件未修改，本轮不扩展修复；这些失败不作为本次云端能力不支持的证据。
-- 云端验证：未执行；本次未提交、推送或触发 Actions，暂无实际运行链接。
+- 初始实现阶段未执行云端验证；后续实际运行与复核见下方日期记录。
 - 当前接入结论：**原生方案暂不可接入（关键云端能力尚未验证，不表示已证实不支持）**。实际运行后由报告按证据给出三类结论之一；只有 native 完整演练及快照/权限通过，才可写“可直接接入”。
 
 本轮不移除本地自动审查、不修改生产 SKILL 调度规则，也不实现多实例执行器。
+
+### 2026-11-11 云端复核与修正
+
+首次运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42967024728 （提交 `72d95fd10606b3726aff22a38f4b458cfffc329d`）。工作流成功，能力并未通过：环境与长消息交付 PASS，完整演练 skipped。原始日志确认 skill 读取和源码写入拒绝成功，快照 helper 与临时写入失败，但旧汇总将这些操作全部标为 UNVERIFIED，存在证据采集遗漏。
+
+已按固定 CLI `0.167.1` 的协议实现修正：该版本不持久化 transient `exec_command_end` / `collab_*` 事件，应读取 `item_completed` 的 typed command/function output/activity；兼容 V2 `list_agents` 的真实状态。子会话元数据、父调用和子会话 turn context 用于核对身份及模型继承。缺少对应宿主证据仍保持 UNVERIFIED，不采用最终模型自述补齐。
+
+权限依据：[官方 permission profiles 文档](https://developers.openai.com/codex/permissions)。`:read-only` 不提供临时写入豁免。基线 probe 保持 read-only；只有门槛满足且快照失败时，在独立 prepared job 中使用 `capability-temp`：继承 `:read-only`，仅允许本次 `runtime-tmp` 写入，同时再次验证源码写入被拒绝。该调整只验证最小适配，不改变 skill 核心规则，不能得出原样直接接入的结论。
+
+失败诊断只保留固定分类（权限拒绝、范围不匹配、未知 helper 失败），不上传任意 stderr。增加事件类型计数帮助识别协议缺口，不上传原始会话日志。
+
+修正后运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474 （提交 `2462b60`），核对中；运行最终结论见后续记录。
+
+本次本地 14 项能力验证测试、`actionlint -shellcheck=` 与 `git diff --check` 通过。按用户要求停止本地自动 code-review，本次不启动。

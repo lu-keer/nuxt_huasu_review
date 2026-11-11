@@ -162,8 +162,15 @@ export function operation(root, op) {
 export function projectRecord(record, thread, root, calls = new Map()) {
   const p = record.payload ?? {}
   const base = { timestamp: record.timestamp, thread }
-  if (record.type === 'response_item' && p.type === 'function_call' && /(?:^|\.)exec_command$/.test(p.name)) {
-    try { calls.set(`${thread}:${p.call_id}`, JSON.parse(p.arguments).cmd) } catch { /* invalid args */ }
+  if (record.type === 'response_item' && p.type === 'function_call') {
+    try { calls.set(`${thread}:${p.call_id}`, { name: p.name, cmd: JSON.parse(p.arguments).cmd }) } catch { /* invalid args */ }
+  }
+  if (record.type === 'response_item' && p.type === 'function_call_output') {
+    const call = calls.get(`${thread}:${p.call_id}`)
+    if (!call) return null
+    return projectRecord({ ...record, type: 'event_msg', payload: { type: 'item_completed', item: {
+      type: 'FunctionCallOutput', id: p.call_id, name: call.name, output: p.output,
+    } } }, thread, root, calls)
   }
   if (record.type === 'session_meta') return { ...base, type: 'session_meta', thread: p.id, parent: p.parent_thread_id ?? p.source?.subagent?.thread_spawn?.parent_thread_id, path: p.agent_path ?? p.source?.subagent?.thread_spawn?.agent_path, cli: p.cli_version }
   if (record.type === 'turn_context') return { ...base, type: 'turn_context', model: p.model, sandbox: p.sandbox_policy?.type }
@@ -186,7 +193,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
         if (!match) return null
         try {
           const evidence = JSON.parse(match[1])
-          const cmd = calls.get(`${thread}:${item.id}`)
+          const cmd = calls.get(`${thread}:${item.id}`)?.cmd
           const exit = output.match(/Process exited with code (\d+)/)
           if (!exit) return null
           return projectRecord({ ...record, payload: { type: 'exec_command_end', command: [cmd], exit_code: Number(exit[1]), aggregated_output: `CAPABILITY_EVIDENCE ${match[1]}` } }, thread, root, calls)
@@ -205,7 +212,9 @@ export function projectRecord(record, thread, root, calls = new Map()) {
   if (record.type === 'response_item' && p.type === 'function_call' && /(?:^|\.)spawn_agent$/.test(p.name)) {
     try {
       const args = JSON.parse(p.arguments)
-      return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model'), control: args.message?.includes('CONTROL_CANCEL') === true }
+      return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model'),
+        task: /^[a-z0-9_]+$/i.test(args.task_name ?? '') ? args.task_name : undefined,
+        control: args.message?.includes('CONTROL_CANCEL') === true }
     } catch { return null }
   }
   if (record.type !== 'event_msg') return null
@@ -278,7 +287,12 @@ export async function observe(root) {
           const record = JSON.parse(line)
           const kind = `${record.type}/${record.payload?.type ?? ''}/${record.payload?.item?.type ?? ''}`
           inventory[kind] = (inventory[kind] ?? 0) + 1
-          if (record.type === 'session_meta') thread = record.payload.id
+          // Forked rollouts embed parent metadata/history. The file's first
+          // metadata identifies its owner; embedded metadata must not reassign it.
+          if (record.type === 'session_meta') {
+            if (thread) continue
+            thread = record.payload.id
+          }
           const projected = projectRecord(record, thread, root, calls)
           if (projected) events.push(projected)
         } catch { /* trailing partial record: next scan will retry */ }
@@ -321,7 +335,13 @@ export function assess(directory) {
   // Match through runtime-owned path/ID, never through the final model report.
   const spawnEvents = [...events.filter(e => e.type === 'collab_agent_spawn_end' && e.new_thread_id),
     ...activities.filter(e => e.kind === 'started').map(e => ({ ...e, new_thread_id: e.id,
-      control: events.some(a => a.type === 'spawn_arguments' && a.call_id === e.call_id && a.control) }))]
+      control: events.some(a => a.type === 'spawn_arguments' && a.call_id === e.call_id && a.control) })),
+    ...events.filter(e => e.type === 'session_meta' && e.parent && e.path).flatMap(e => {
+      const args = events.find(a => a.type === 'spawn_arguments' && a.thread === e.parent && e.path === `/root/${a.task}`)
+      if (!args) return []
+      const context = events.find(a => a.type === 'turn_context' && a.thread === e.thread)
+      return [{ ...e, new_thread_id: e.thread, call_id: args.call_id, control: args.control, model: context?.model }]
+    })]
   const workers = RULES.map(rule => {
     const reads = opEvents(`read-${rule}`).filter(e => e.status === 'PASS' && e.exitCode === 0 &&
       /^[a-f0-9]{64}$/.test(e.manifestHash) && e.patchHash === config.patchHash && e.ruleHash === config.ruleHashes?.[rule])

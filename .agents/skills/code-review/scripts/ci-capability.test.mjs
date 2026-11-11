@@ -199,3 +199,41 @@ test('typed exec output alone cannot authenticate a command', t => {
   } } }
   assert.equal(projectRecord(record, 'parent', root), null)
 })
+
+test('V2 runtime child metadata and host status prove identities without legacy collab events', t => {
+  const { dir, events } = evidence(t)
+  const source = events.filter(e => !e.type.startsWith('collab_'))
+  for (let i = 0; i < RULES.length; i++) {
+    const args = source.find(e => e.type === 'spawn_arguments' && e.call_id === `call-${i}`)
+    args.thread = 'parent'
+    args.task = RULES[i]
+    source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
+  }
+  source.push({ type: 'host_status', agents: RULES.map(rule => ({ path: `/root/${rule}`, status: 'completed', valid: true })) })
+  save(join(dir, 'events.json'), source)
+  assert.equal(assess(dir).checks.delegation, 'PASS')
+  assert.equal(assess(dir).checks.concurrency_model, 'PASS')
+  source.find(e => e.type === 'session_meta' && e.thread === 'worker-0').parent = 'unrelated'
+  save(join(dir, 'events.json'), source)
+  assert.equal(assess(dir).checks.delegation, 'UNVERIFIED')
+})
+
+test('response outputs require matched host calls and fork metadata cannot overwrite owner', async t => {
+  const root = temporary(t)
+  for (const dir of ['public', 'private', 'codex-home/sessions']) mkdirSync(join(root, dir), { recursive: true })
+  writeFileSync(join(root, 'delivery-input.txt'), 'delivery')
+  save(join(root, 'private/final.json'), { report: 'fixture', delivery_payload: 'delivery' })
+  save(join(root, 'private/outcome.json'), { action: 'success' })
+  const records = [
+    { type: 'session_meta', payload: { id: 'child', parent_thread_id: 'parent', agent_path: '/root/standards' } },
+    { type: 'session_meta', payload: { id: 'parent' } },
+    { type: 'response_item', payload: { type: 'function_call', name: 'collaboration.list_agents', call_id: 'list', arguments: '{}' } },
+    { type: 'response_item', payload: { type: 'function_call_output', call_id: 'list', output: JSON.stringify({ agents: [{ agent_name: '/root/standards', agent_status: { completed: 'NO_FINDINGS' } }] }) } },
+    { type: 'event_msg', payload: { type: 'task_complete' } },
+  ]
+  writeFileSync(join(root, 'codex-home/sessions/child.jsonl'), records.map(r => JSON.stringify(r)).join('\n'))
+  await observe(root)
+  const events = JSON.parse(readFileSync(join(root, 'public/events.json')))
+  assert.ok(events.every(e => e.thread === 'child'))
+  assert.equal(events.find(e => e.type === 'host_status').agents[0].valid, true)
+})
