@@ -47,14 +47,14 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 | 正式验收项目 | 当前记录 |
 | --- | --- |
 | 共用模块抽取后的能力回归 | [42980002970](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42980002970)，通过：六路身份/模型/终态及 prepared 演练已核对 |
-| 正式普通代码及零文本路径 | 待执行 |
-| 六路真实身份、完整材料、模型和终态 | 待正式运行核对 |
-| 已知缺陷 finding 且检查成功 | 待执行 |
-| 执行失败检查失败及失败报告 | 待执行；本地注入已覆盖 |
-| head 修改自身 skill/规则仍使用 base | 待真实 PR 核对 |
-| opened/synchronize/reopened/ready_for_review | 待逐项记录 |
-| 连续推送、force push、旧 run/attempt 不覆盖 | 待云端验证；本地 publisher 测试通过 |
-| 长报告完整保存、源码拒写与临时写成功 | 能力验收已通过；正式链路待核对 |
+| 正式普通代码及零文本路径 | [正式 PR](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42981522611) 三 job 成功；[零文本](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42981795772) 完成且 workers=[]、outcome=skipped |
+| 六路真实身份、完整材料、模型和终态 | 42981522611 的 report/evidence artifact 已下载核对，六路独立且完成、完整材料摘要一致、模型继承确认 |
+| 已知缺陷 finding 且检查成功 | [42981926576](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42981926576)：sum([]) 缺少初始值的 Major 保留，三 job 成功 |
+| 执行失败检查失败及失败报告 | [42981994642](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42981994642)：execute/review 失败、comment 成功；result.status=incomplete，明确不能判定无问题 |
+| head 修改自身 skill/配置仍使用 base | 42981926576：artifact skillHash=fb59b435… 与 base c651e62 相等，和 head 53e6926 的 9ef60c84… 不同；六路模型仍为 gpt-6.1-sol。AGENTS 标记作为 Standards 数据读取，未改变输出 |
+| opened/synchronize/reopened/ready_for_review | opened=42981522611；草稿跳过=42981717370；ready=42981795772；reopened=42982042237；synchronize=42982278222；force push=42982325099，均符合预期 |
+| 连续推送、force push、旧 run/attempt 不覆盖 | fixture 旧 head 运行 42981816353 实际 cancelled，新 head 42981926576 成功；force push 42982325099 成功；同 SHA 较旧 run 重跑核对中。本地 publisher 测试通过 |
+| 长报告完整保存、源码拒写与临时写成功 | 共用模块回归 42980002970 prepared 已通过并下载；正式报告 artifact 可下载，超 50,000 字符发布分支本地测试通过。未在真实 PR 强制生成超长模型报告或尝试源码写入，不将其标为正式 PR 已执行 |
 
 以下保留前置验证历史，涉及“尚未正式接入”的描述属于对应历史阶段，不代替上述正式验收记录。
 
