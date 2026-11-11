@@ -79,3 +79,5 @@ CI 的预构建材料由调用方持有，worker 与主会话不删除；报告�
 }
 ```
 <!-- ai-rule-catalog:end -->
+
+<!-- HEAD_CONFIG_MARKER: acceptance-only change; must not be the trusted skill version. -->
