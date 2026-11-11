@@ -28,6 +28,20 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 
 ## 检查与报告策略
 
+### 严格调度验收（evidenceVersion=2）
+
+正式审查与能力验证共用 `ci-scheduling.mjs`，不再以任意两路区间重叠作为通过依据。可信 context/config 固定 `schedulingPolicy=required`；缺失、降级或调度结果为 FAIL/UNVERIFIED 时，review 未完成且失败，仍保留已核实 findings。零可审查文本不启动模型，调度为 NOT_APPLICABLE。
+
+可信准备显式配置 `agents.max_concurrent_threads_per_session=2`（不含主会话），并在模型调用前由固定 CLI `0.167.1` 的 app-server `config/read` 查询有效容量及子任务默认配置。该查询不创建模型 turn，不携带 API key；只保存白名单容量、版本与配置摘要。接口或有效配置未验证时准备失败，不调用模型。配置语义来源：[官方 multi-agent 文档](https://developers.openai.com/codex/multi-agent/)，固定 CLI 另用 strict-config 与真实 config/read 验证，不以最新版文档代替版本验证。
+
+观察器保存同一父会话的 spawn 请求/返回、任务身份、原始时间/记录顺序、等待/状态查询、fork_turns 与 model/effort 覆盖标记、子会话实际配置。继续过滤继承历史、认证、prompt 和任意输出。校验器核查六路完整身份链，有名额且提交已返回时必须继续提交，满额才等待；快速自然完成和阻塞 spawn 不直接判违规。容量、返回、顺序或实际配置不完整时 UNVERIFIED，不估算宿主耗时。
+
+独立能力验证额外执行六个快速控制任务和六个有界保持任务，名称与规则任务隔离；保持 helper 固定 20 秒，每任务预算 30 秒、整组 5 分钟。控制演练验证实际并发及容量调度，不能代替六路审查；控制证据缺失不解锁完整演练。
+
+发布限制：实现 PR 自身使用旧 base 的可信适配器，其检查不能作为新门槛验收。先在实现分支通过严格能力验证，再合入实现；之后从新 base 创建普通变更、零文本和受控证据缺失的验收 PR。严格能力未通过不得发布，不升级 CLI、不提供宽松模式。旧 PR #9 报告不重写。
+
+本地验证与实际云端结果见后续“严格调度修正验收记录”；本地测试不代表云端通过。
+
 - 全部必要任务、核查与报告完成时 review 成功，包括有 findings。
 - 零可审查文本时不调用 Codex，正常完成。
 - 任一路失败、超时、缺失、输出无效、材料读取失败或证据不足时 review 失败，保留已核实 findings，不显示“未发现问题”。失败不自动重试、不换模型、不降级。

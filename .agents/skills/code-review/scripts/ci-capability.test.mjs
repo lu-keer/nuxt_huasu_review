@@ -1,3 +1,4 @@
+import { contract, strictFixture, controlFixture } from './ci-scheduling-fixture.test.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -44,6 +45,10 @@ function evidence(t, mode = 'probe') {
     { type: 'collab_agent_spawn_end', new_thread_id: 'control', control: true, status: 'running' },
     { type: 'collab_close_end', receiver_thread_id: 'control', status: 'shutdown' },
   ]
+  strictFixture(config, events, RULES)
+  controlFixture(events, config)
+  save(join(dir, 'config.json'), config)
+  save(join(dir, 'runtime-contract.json'), contract)
   save(join(dir, 'events.json'), events)
   return { dir, events, config }
 }
@@ -207,7 +212,7 @@ test('V2 runtime child metadata and host status prove identities without legacy 
     const args = source.find(e => e.type === 'spawn_arguments' && e.call_id === `call-${i}`)
     args.thread = 'parent'
     args.task = RULES[i]
-    source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
+    if (!source.some(e => e.type === 'session_meta' && e.thread === `worker-${i}`)) source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
   }
   source.push({ type: 'host_status', agents: RULES.map(rule => ({ path: `/root/${rule}`, status: 'completed', valid: true })) })
   save(join(dir, 'events.json'), source)

@@ -1,3 +1,4 @@
+import { contract, strictFixture } from './ci-scheduling-fixture.test.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawnSync } from 'node:child_process'
@@ -142,6 +143,8 @@ function runtimeEvidence(t) {
       { type: 'worker_turn_completed', thread: `worker-${i}`, valid: true, timestamp: time(i + 15) },
     ]),
   ]
+  strictFixture(config, events, RULES)
+  save(join(root, 'runtime-contract.json'), contract)
   const persist = () => {
     save(join(root, 'config.json'), config); save(join(root, 'final.json'), final)
     save(join(root, 'events.json'), events); save(join(root, 'outcome.json'), { action: 'success' })
@@ -179,6 +182,23 @@ test('missing artifact and malformed findings retain explicit incomplete status'
   const f = runtimeEvidence(t)
   f.final.findings.push({ severity: 'Major', file: 'README.md', line: 1 })
   assert.throws(() => validateResult(f.final, f.config), /invalid finding/)
+})
+
+test('strict policy, capacity and spawn returns are required while valid findings survive failure', t => {
+  for (const scenario of ['policy', 'capacity', 'return', 'effort']) {
+    const f = runtimeEvidence(t)
+    f.final.findings.push({ severity: 'Minor', file: 'widget.ts', line: 1, title: 'Retained finding', evidence: 'value = 2', trigger: 'caller', impact: 'wrong value' })
+    f.final.report += '\nMinor widget.ts:1 Retained finding\n'
+    if (scenario === 'policy') delete f.config.schedulingPolicy
+    if (scenario === 'capacity') rmSync(join(f.root, 'runtime-contract.json'))
+    if (scenario === 'return') f.events.splice(f.events.findIndex(e => e.type === 'tool_return'), 1)
+    if (scenario === 'effort') f.events.find(e => e.type === 'turn_context' && e.thread === 'worker-0').effort = 'high'
+    f.persist()
+    const result = assessReview(f.root, f.output)
+    assert.equal(result.status, 'incomplete', scenario)
+    assert.equal(result.counts.Minor, 1, scenario)
+    assert.ok(result.reasons.length)
+  }
 })
 
 test('long report keeps complete artifact and publishes summary without truncated findings', t => {

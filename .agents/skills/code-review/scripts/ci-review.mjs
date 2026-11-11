@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { queryRuntimeContract } from './ci-runtime-contract.mjs'
+import { assessScheduling, EVIDENCE_VERSION, WORKER_CAPACITY } from './ci-scheduling.mjs'
 // Trusted CI adapter. Review decisions remain in SKILL.md and its rule documents.
 import { spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -57,7 +59,7 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   const catalog = ['standards', ...manifest.ruleCatalog.map(rule => rule.path.split('/').at(-1).replace(/\.md$/, ''))]
   if ([...catalog].sort().join(',') !== [...RULES].sort().join(',')) throw new Error('unexpected rule catalog; update the CI adapter explicitly')
   const config = {
-    version: 1, entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
+    version: 1, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
     repositoryRoot: repo, root, manifestPath, reviewFiles: manifest.textFiles, textFileCount: manifest.textFileCount,
     cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: 'temp-write-only',
     manifestHash: digest(readFileSync(manifestPath)), patchHash: digest(Buffer.concat(manifest.layers.map(l => readFileSync(l.patchPath)))),
@@ -68,7 +70,7 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   save(join(root, 'public/config.json'), config)
   cpSync(manifest.tempDirectory, join(root, 'public/snapshot'), { recursive: true })
   save(join(root, 'private/context.json'), { ...config, trustedSkill: join(root, 'skill/SKILL.md'), outputDirectory: join(root, 'runtime-tmp'), materialOwner: 'caller' })
-  writeFileSync(join(root, 'codex-home/config.toml'), `project_doc_max_bytes = 0\n[permissions.review-temp]\nextends = ":read-only"\n[permissions.review-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n`)
+  writeFileSync(join(root, 'codex-home/config.toml'), `project_doc_max_bytes = 0\n[agents]\nmax_concurrent_threads_per_session = ${WORKER_CAPACITY}\n[permissions.review-temp]\nextends = ":read-only"\n[permissions.review-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n`)
   const command = id => `node ${join(root, 'skill/scripts/ci-review.mjs')} operation ${root} ${id}`
   writeFileSync(join(root, 'private/prompt.md'), readFileSync(join(root, 'skill/references/ci-review.md'), 'utf8') +
     `\n\n## 固定调用上下文\n${JSON.stringify({ context: join(root, 'private/context.json'), skill: join(root, 'skill/SKILL.md'), repositoryRoot: repo, manifestPath, base, head, controller: join(root, 'controller') }, null, 2)}\n\n` +
@@ -88,7 +90,7 @@ export function readMaterial(root, operation) {
   let output = ''
   try {
     const context = json(join(root, 'private/context.json'))
-    if (context.version !== 1 || context.materialOwner !== 'caller' ||
+    if (context.evidenceVersion !== EVIDENCE_VERSION || context.schedulingPolicy !== 'required' || config.evidenceVersion !== EVIDENCE_VERSION || config.schedulingPolicy !== 'required' || context.version !== 1 || context.materialOwner !== 'caller' ||
         ['base', 'head', 'manifestPath', 'repositoryRoot', 'manifestHash', 'patchHash'].some(key => context[key] !== config[key]) ||
         canonical(context.trustedSkill) !== canonical(join(root, 'skill/SKILL.md')) ||
         canonical(context.outputDirectory) !== canonical(join(root, 'runtime-tmp'))) throw new Error('invalid CI context')
@@ -147,14 +149,17 @@ export async function observeReview(root) {
 export function assessReview(input, output, expected = {}) {
   mkdirSync(output, { recursive: true })
   const reasons = []
+  let scheduling = { status: 'UNVERIFIED', reasons: ['EVIDENCE_MISSING'] }
   let config, final, workers = [], outcome = 'unknown', complete = false
   try {
     config = json(join(input, 'config.json'))
     for (const key of ['base', 'head', 'run', 'attempt']) if (expected[key] && String(config[key]) !== String(expected[key])) throw new Error(`mismatched ${key}`)
+    if (config.evidenceVersion !== EVIDENCE_VERSION || config.schedulingPolicy !== 'required') reasons.push('strict scheduling policy missing or downgraded')
     final = validateResult(json(join(input, 'final.json')), config)
     outcome = json(join(input, 'outcome.json')).action
     if (!config.textFileCount) {
-      complete = outcome === 'skipped' && final.status === 'complete' && !final.tasks.length && !final.findings.length
+      scheduling = { status: 'NOT_APPLICABLE', reasons: [], configuration: { policy: reasons.length ? 'UNVERIFIED' : 'PASS' } }
+      complete = reasons.length === 0 && outcome === 'skipped' && final.status === 'complete' && !final.tasks.length && !final.findings.length
     } else {
       const events = json(join(input, 'events.json'))
       const analysis = assessWorkers(events, config)
@@ -166,15 +171,15 @@ export function assessReview(input, output, expected = {}) {
       const sameMaterials = workers.every(w => w.reads.length && w.reads.every(r => r.manifestHash === config.manifestHash))
       const roster = workers.every(w => final.tasks.filter(t => t.rule === w.rule && [w.id, `/root/${w.rule}`].includes(t.agent) && t.status === 'completed').length === 1) &&
         final.tasks.every(t => t.status === 'completed')
-      const overlap = workers.some((a, i) => workers.slice(i + 1).some(b => a.runningFrom && a.runningUntil && b.runningFrom && b.runningUntil &&
-        Date.parse(a.runningFrom) < Date.parse(b.runningUntil) && Date.parse(b.runningFrom) < Date.parse(a.runningUntil)))
+      const contract = existsSync(join(input, 'runtime-contract.json')) ? json(join(input, 'runtime-contract.json')) : null
+      scheduling = assessScheduling(events, config, contract)
       const terminals = analysis.spawnEvents.every(spawn => events.some(e =>
         e.type === 'worker_turn_completed' && e.thread === spawn.new_thread_id || e.type === 'host_status' && e.agents?.some(a => a.path === spawn.path && ['completed', 'interrupted', 'errored', 'shutdown'].includes(a.status))))
       if (!environment) reasons.push('环境或固定模型证据不完整')
       if (!skill) reasons.push('可信 skill 读取证据缺失')
       if (new Set(workers.map(w => w.id).filter(Boolean)).size !== RULES.length || !sameMaterials || !roster) reasons.push('六路身份、报告名单或完整材料证据不完整')
       if (!workers.every(w => w.status === 'completed' && w.modelConfirmed)) reasons.push('必要任务未完成、输出无效或模型继承未证实')
-      if (!overlap) reasons.push('缺少实际并发执行证据')
+      if (scheduling.status !== 'PASS') reasons.push(`调度 ${scheduling.status}: ${scheduling.reasons.join(', ')}`)
       if (!terminals) reasons.push('存在未确认停止的派生任务')
       if (events.some(e => e.type === 'operation' && (e.status !== 'PASS' || e.exitCode !== 0))) reasons.push('材料读取失败')
       if (outcome !== 'success' || final.status !== 'complete') reasons.push('调用失败或主会话报告未完成')
@@ -185,9 +190,10 @@ export function assessReview(input, output, expected = {}) {
   const findings = final?.findings ?? []
   const counts = Object.fromEntries(['Critical', 'Major', 'Minor'].map(s => [s, findings.filter(f => f.severity === s).length]))
   const metadata = { status: complete ? 'complete' : 'incomplete', base: expected.base ?? config?.base, head: expected.head ?? config?.head,
-    run: expected.run ?? config?.run, attempt: expected.attempt ?? config?.attempt, counts, reasons, workers, outcome }
+    run: expected.run ?? config?.run, attempt: expected.attempt ?? config?.attempt, counts, reasons, workers, outcome, scheduling, configuration: scheduling.configuration ?? null }
   const header = `审查 head：${metadata.head ?? '未知'}\n\n可信 skill 来源 base：${metadata.base ?? '未知'}\n\nCLI：${CLI_VERSION}；模型：gpt-6.1-sol / low\n\n整体状态：${complete ? '完成' : '未完成'}\n\n`
-  const report = header + (final?.report ?? '## Standards\n审查未完成。\n\n## AI Review Rules\n未取得有效报告。\n\n## Summary\n执行失败，不能判定未发现问题。') +
+  const schedulingReport = `调度验收：${config?.textFileCount === 0 ? 'N/A（无可审查文本）' : scheduling.status}；原因：${scheduling.reasons.join(', ') || '无'}\n\n`
+  const report = header + schedulingReport + (final?.report ?? '## Standards\n审查未完成。\n\n## AI Review Rules\n未取得有效报告。\n\n## Summary\n执行失败，不能判定未发现问题。') +
     (reasons.length ? '\n\n未完成原因：\n' + reasons.map(r => `- ${r}`).join('\n') : '')
   save(join(output, 'result.json'), metadata)
   writeFileSync(join(output, 'report.md'), report + '\n')
@@ -199,7 +205,7 @@ export function commentBody(result, report, runUrl, artifactUrl) {
   const full = `${stamp}\n\n## Codex PR 审查\n\n${report}\n\n[完整报告与证据](${artifactUrl}) · [Actions](${runUrl})`
   if (Array.from(full).length <= 50000) return full
   const tasks = (result.workers ?? []).map(w => `${w.rule}: ${w.status}`).join('；') || '没有规则任务证据'
-  return `${stamp}\n\n## Codex PR 审查\n\n审查 head：${result.head}\n\n整体状态：${result.status === 'complete' ? '完成' : '未完成'}\n\n任务：${tasks}\n\nCritical ${result.counts.Critical} / Major ${result.counts.Major} / Minor ${result.counts.Minor}\n\n报告较长，全部 findings 保存在[完整报告与证据](${artifactUrl})中。\n\n[Actions](${runUrl})`
+  return `${stamp}\n\n## Codex PR 审查\n\n审查 head：${result.head}\n\n整体状态：${result.status === 'complete' ? '完成' : '未完成'}\n\n调度：${result.scheduling?.status ?? 'UNVERIFIED'}；${result.scheduling?.reasons?.join(', ') ?? '证据不可用'}\n\n任务：${tasks}\n\nCritical ${result.counts.Critical} / Major ${result.counts.Major} / Minor ${result.counts.Minor}\n\n报告较长，全部 findings 保存在[完整报告与证据](${artifactUrl})中。\n\n[Actions](${runUrl})`
 }
 export function newerComment(body, result) {
   const stamp = body?.match(/<!-- codex-run ([a-f0-9]{40}) (\d+) (\d+) -->/)
@@ -228,6 +234,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (config.textFileCount) {
       const child = spawn(process.execPath, [join(root, 'skill/scripts/ci-review.mjs'), 'observe', root], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT } })
       child.unref()
+      if ((await queryRuntimeContract(resolve(root))).status !== 'PASS') throw new Error('Pinned runtime contract could not be verified; no model call allowed')
     }
     if (process.env.GITHUB_OUTPUT) {
       const { appendFileSync } = await import('node:fs')
