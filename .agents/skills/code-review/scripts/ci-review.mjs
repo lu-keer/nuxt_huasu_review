@@ -198,7 +198,8 @@ export function commentBody(result, report, runUrl, artifactUrl) {
   const stamp = `<!-- codex-pr-review -->\n<!-- codex-run ${result.head} ${result.run} ${result.attempt} -->`
   const full = `${stamp}\n\n## Codex PR 审查\n\n${report}\n\n[完整报告与证据](${artifactUrl}) · [Actions](${runUrl})`
   if (Array.from(full).length <= 50000) return full
-  return `${stamp}\n\n## Codex PR 审查\n\n审查 head：${result.head}\n\n整体状态：${result.status === 'complete' ? '完成' : '未完成'}\n\nCritical ${result.counts.Critical} / Major ${result.counts.Major} / Minor ${result.counts.Minor}\n\n报告较长，全部 findings 保存在[完整报告与证据](${artifactUrl})中。\n\n[Actions](${runUrl})`
+  const tasks = (result.workers ?? []).map(w => `${w.rule}: ${w.status}`).join('；') || '没有规则任务证据'
+  return `${stamp}\n\n## Codex PR 审查\n\n审查 head：${result.head}\n\n整体状态：${result.status === 'complete' ? '完成' : '未完成'}\n\n任务：${tasks}\n\nCritical ${result.counts.Critical} / Major ${result.counts.Major} / Minor ${result.counts.Minor}\n\n报告较长，全部 findings 保存在[完整报告与证据](${artifactUrl})中。\n\n[Actions](${runUrl})`
 }
 export function newerComment(body, result) {
   const stamp = body?.match(/<!-- codex-run ([a-f0-9]{40}) (\d+) (\d+) -->/)

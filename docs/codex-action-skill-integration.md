@@ -53,7 +53,7 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 | 执行失败检查失败及失败报告 | [42981994642](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42981994642)：execute/review 失败、comment 成功；result.status=incomplete，明确不能判定无问题 |
 | head 修改自身 skill/配置仍使用 base | 42981926576：artifact skillHash=fb59b435… 与 base c651e62 相等，和 head 53e6926 的 9ef60c84… 不同；六路模型仍为 gpt-6.1-sol。AGENTS 标记作为 Standards 数据读取，未改变输出 |
 | opened/synchronize/reopened/ready_for_review | opened=42981522611；草稿跳过=42981717370；ready=42981795772；reopened=42982042237；synchronize=42982278222；force push=42982325099，均符合预期 |
-| 连续推送、force push、旧 run/attempt 不覆盖 | fixture 旧 head 运行 42981816353 实际 cancelled，新 head 42981926576 成功；force push 42982325099 成功；同 SHA 较旧 run 重跑核对中。本地 publisher 测试通过 |
+| 连续推送、force push、旧 run/attempt 不覆盖 | fixture 旧 head 运行 42981816353 实际 cancelled，新 head 42981926576 成功；force push 42982325099 成功；同 SHA 较旧 run 42982325099 attempt 2 的发布日志明确为 newer-result，未覆盖较新 42982471807。本地 publisher 测试通过 |
 | 长报告完整保存、源码拒写与临时写成功 | 共用模块回归 42980002970 prepared 已通过并下载；正式报告 artifact 可下载，超 50,000 字符发布分支本地测试通过。未在真实 PR 强制生成超长模型报告或尝试源码写入，不将其标为正式 PR 已执行 |
 
 以下保留前置验证历史，涉及“尚未正式接入”的描述属于对应历史阶段，不代替上述正式验收记录。
