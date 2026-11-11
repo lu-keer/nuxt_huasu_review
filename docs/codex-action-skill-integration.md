@@ -177,4 +177,15 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 
 本地机械验证：`node --test .agents/skills/code-review/scripts/ci-review.test.mjs .agents/skills/code-review/scripts/ci-capability.test.mjs`，`actionlint -shellcheck=` 与 `git diff --check`。正式云端结果将在实际运行后补充，当前不标记完成。本次不启动本地自动 code-review。
 
-取消边界：除 `cancelled()` 外，review/comment 显式要求 `needs.execute.result != ''cancelled''`，避免 job 级取消被误作执行失败继续合成报告。取消保护验证使用运行 [42983040977](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42983040977)，由后续文档提交触发新的 execute 并取消该旧执行；最终实际状态将记录在上线验收中。
+取消边界：除 `cancelled()` 外，review/comment 显式要求 `needs.execute.result != 'cancelled'`，避免 job 级取消被误作执行失败继续合成报告。取消保护验证使用运行 [42983040977](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42983040977)，由后续文档提交触发新的 execute 并取消该旧执行；最终实际状态将记录在上线验收中。
+
+## 上线验收与本地流程退出（2026-11-11）
+
+- 第一阶段 PR #3 已合入 main（ad8175d），能力回归 42980002970 的 probe/prepared 各六路身份、材料、模型和终态已核对。
+- 第二阶段 PR #4 已合入 main。最终正式验收 [42983188198](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42983188198)，固定 head `888c9db659a3ab72b374c0beeddd0e241e8ddc1e`、可信 base `ad8175d697822e96f7900082fafaeee0644bbd31`；execute/review/comment 全部成功。已下载 report/evidence，六路独立、completed、modelConfirmed 全部为 6，reasons=[]，findings=0。
+- 取消保护验收 42983040977：execute cancelled，review/comment skipped，无合成报告。较早运行暴露的 job 级取消边界已修复。
+- 已知缺陷与异常验收见上表。临时 PR #5/#6/#7 已关闭，缺陷、无害配置标记与失败注入均未合入 main。
+- 第三阶段独立移除根 AGENTS 的本地自动触发及桌面自动调度要求，setup-huasu 不再写回这些内容；保留中文交流、code-review skill、依赖和锁文件条目及显式手动调用。
+- 不恢复本地自动审查。后续 workflow 故障可回退 PR #4 的正式 workflow 切换；能力验证 workflow 保留用于 CLI/Action 升级回归。
+
+验证范围限制：没有在真实 PR 强制生成超过 50,000 字符的模型报告或执行源码写入尝试。长报告摘要/完整保存经本地机械测试，源码拒写/临时可写及模型长消息经独立能力回归验证，不将其冒充正式 PR 中重复执行的结果。
