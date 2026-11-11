@@ -6,6 +6,8 @@
 
 所有原生 worker（包括控制任务）显式传 `fork_turns: "none"`，不复制父会话历史；仍不传 model，模型继承由宿主配置和子会话实际 turn context 验证。每路任务消息必须完整给出可信规则、manifest、读取命令和预算。控制任务固定命名 `control_cancel`。
 
+将 SKILL 第 2 节的 worker 输出约定明确写入每条规则任务消息：无问题仅输出单独一行 `NO_FINDINGS`；有问题提供 `Critical` / `Major` / `Minor` 严重程度、文件、行号、关键代码、触发条件及影响。不要要求 worker 转述读取摘要、退出码或提交能力报告 JSON；这些由观察器直接采集。
+
 依次执行：
 
 1. 原样执行追加的 `read-skill`、`build-snapshot`、`write-source`、`write-temp`、`read-instructions` 命令。保留真实退出码；失败不重试、不提升权限。build-snapshot 失败后不得宣称原版 helper 可用。

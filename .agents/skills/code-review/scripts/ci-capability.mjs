@@ -27,6 +27,13 @@ const validOutput = status => {
   return typeof output === 'string' && (output.trim() === 'NO_FINDINGS' ||
     /Critical|Major|Minor/.test(output) && /sample\.js/.test(output) && /\d+/.test(output))
 }
+const outputFormat = output => {
+  if (typeof output !== 'string' || !output.trim()) return 'missing'
+  if (output.trim() === 'NO_FINDINGS') return 'no_findings'
+  try { JSON.parse(output); return 'structured' } catch { /* plain text */ }
+  if (/\bNO_FINDINGS\b/.test(output)) return 'no_findings_with_extra_text'
+  return validOutput({ completed: output }) ? 'findings' : 'unrecognized'
+}
 const canonical = path => {
   const actual = realpathSync.native(path)
   return process.platform === 'win32' ? actual.toLowerCase() : actual
@@ -221,7 +228,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
   if (p.type === 'sub_agent_activity') return { ...base, type: 'agent_activity', id: p.agent_thread_id, path: p.agent_path, kind: p.kind, model: p.model, call_id: p.event_id }
   if (['task_started', 'turn_started', 'task_complete', 'turn_complete'].includes(p.type)) {
     return { ...base, type: p.type.endsWith('started') ? 'worker_turn_started' : 'worker_turn_completed',
-      ...(p.type.endsWith('started') ? {} : { valid: validOutput({ completed: p.last_agent_message }) }) }
+      ...(p.type.endsWith('started') ? {} : { valid: validOutput({ completed: p.last_agent_message }), outputFormat: outputFormat(p.last_agent_message) }) }
   }
   if (/^collab_(agent_spawn|waiting|close|agent_interaction)_(begin|end)$/.test(p.type)) {
     const out = { ...base, type: p.type }
@@ -376,6 +383,7 @@ export function assess(directory) {
     return { rule, id: spawn?.new_thread_id, spawn: spawn?.timestamp, end: end?.timestamp,
       runningFrom: started?.timestamp, runningUntil: completed?.timestamp,
       status: end ? 'completed' : statuses.at(-1)?.status === 'completed' ? 'completed / invalid_output' : statuses.at(-1)?.status ?? 'unknown', model: spawn?.model,
+      outputFormat: completed?.outputFormat ?? 'unavailable',
       modelConfirmed: spawn?.model === config.model && context.length > 0 && context.every(e => e.model === config.model) &&
         events.some(e => e.type === 'spawn_arguments' && e.call_id === spawn?.call_id && e.overridesModel === false),
       reads, duration: '不可用' }

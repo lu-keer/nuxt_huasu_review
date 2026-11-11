@@ -4,6 +4,8 @@
 
 六路原生 worker 均显式传 `fork_turns: "none"`，不复制父会话历史，仍不传 model。各任务消息完整给出规则路径、同一 manifest、读取命令、预算及只读边界；材料仍由 worker 自行读取。
 
+每条规则任务消息明确附上 SKILL 第 2 节的输出约定：无问题仅返回单独一行 `NO_FINDINGS`；有问题提供 `Critical` / `Major` / `Minor` 严重程度、文件、行号、关键代码、触发条件及影响。worker 不输出能力报告 JSON，也不转述读取摘要或退出码；观察器直接采集读取证据。
+
 先执行调用方给出的 read-skill 命令读取可信 SKILL.md，以及 write-source、write-temp 权限探测。prepared 模式仅开放 runtime-tmp 写入，源码必须保持只读；该权限适配不能表述为原始 read-only 全部通过。按其中流程执行一次完整审查。调用方追加了两种模式之一：
 
 - native：在 fixture cwd 直接执行原版 build-review-manifest.mjs --base 命令，遵循其真实退出码。失败即停止演练，不自行切换 prepared。
