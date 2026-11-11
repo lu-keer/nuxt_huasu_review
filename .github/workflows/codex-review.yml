@@ -33,7 +33,7 @@ jobs:
       - name: Check credential availability
         if: steps.prepare.outputs.has_text == 'true'
         env:
-          HAS_CREDENTIAL: ${{ secrets.OPENAI_API_KEY != '' }}
+          HAS_CREDENTIAL: 'false'
         run: test "$HAS_CREDENTIAL" = true || { echo '::error::OPENAI_API_KEY is not configured.'; exit 1; }
       - name: Call trusted code-review skill
         if: steps.prepare.outputs.has_text == 'true'
