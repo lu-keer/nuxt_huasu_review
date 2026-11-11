@@ -7,6 +7,8 @@ description: '审查 branch、tag、commit 或工作区变更，排除文档与 
 
 ## 1. 构建快照
 
+CI 调用方提供可信预构建 context 时，先读取 [CI 调用契约](references/ci-review.md)，执行可信 read-skill 和各 worker 的 read-规则ID 命令，使用 context 指定的同一 manifest；这些命令校验仓库、固定 base/head 和材料摘要。材料已由原 helper 在 Codex 启动前构建，不再次构建、替换或切换快照，校验失败立即报告未完成。没有 CI context 时继续按以下本地方式构建。
+
 在被审查项目目录执行 `node <skill绝对路径>/scripts/build-review-manifest.mjs [--base <fixed-point>]`，保持 cwd 指向目标项目，不切换到 skill 安装目录；核对返回 manifest 的 `repositoryRoot` 与目标仓库一致。未指定固定点时仅审 staged、unstaged、untracked；用户指定 branch、tag、commit 等 git ref 时传 `--base`，同时审该点到 HEAD 的提交和未提交变更。不改变扫描范围。
 
 以本次实际执行 helper 的退出码、stdout 和 stderr 判断快照是否成功；失败报告附执行命令、skill 绝对路径、被审查仓库路径及相关 stderr。历史报告、测试中的模拟失败和源码中的错误字符串不能作为本次失败证据。诊断中的 patch「字节数 0」表示 Git 输出为空，不代表源文件为 0 字节；空文件本身是合法变更，由 helper 生成并校验 patch，不据此提前停止。
@@ -59,6 +61,8 @@ helper 失败或固定点无效时停止并报告。`textFileCount === 0` 时不
 失败报告抄真实终态与可用耗时；未取得终态则写审查未完成，并附身份信息。区分超时、取消与宿主报错，不把等待中断说成已完成。
 
 只在全部原生任务按宿主接口确认停止、且无启动身份不明任务后，删除 helper 的准确 `tempDirectory`。否则保留目录并报告身份及材料路径。没有再次运行 helper 时不自动清理。
+
+CI 的预构建材料由调用方持有，worker 与主会话不删除；报告准确路径、任务终态及保留状态，调用方仅在全部任务确认停止后清理，无法确认时交由 runner 生命周期回收。CI worker 使用独立上下文 `fork_turns: "none"`，不覆盖模型；调用方必须在任务消息中完整传递本技能的材料、预算、边界与输出约定。
 
 ## 规则适用目录
 

@@ -210,7 +210,7 @@ CI 验收完成后：
 | 模型 / effort | `gpt-6.1-sol` / `low` |
 | endpoint | 沿用 `https://gptapi001.huasu.org/v1/responses` |
 | 权限 | `contents: read`，无评论写入权限 |
-| sandbox / safety | `read-only` / `drop-sudo` |
+| sandbox / safety | probe 为 `read-only`；prepared 演练为 `capability-temp`（只读继承，仅 runtime-tmp 可写）；`drop-sudo` |
 | 运行环境 | `ubuntu-latest`；每个 Codex job 外层 40 分钟 |
 | 子代理开关 | 不添加；所选 CLI 的 `features list` 显示 `multi_agent` 为 stable、默认 true |
 
@@ -233,7 +233,7 @@ CI 验收完成后：
 
 模型最终消息写入 private 目录。观察进程只输出符合 schema、经过凭据形状脱敏的 fixture 报告；长交付文本必须与准备阶段生成的内容完全一致，否则不发布该文本并标记未验证。父模型自行声称六路完成不能让门槛通过。记录不足、事件格式变化或模型通过无法关联的工具封装调用时，一律 `UNVERIFIED`，不猜测成功。
 
-取消测试要求宿主报告控制任务 running，并在 close 事件中确认非 completed 的有效停止终态。规则必须有独立身份、完整材料摘要以及有效 completed 输出证据。模型继承同时核对 spawn 参数没有 model 覆盖、实际 spawn 模型及子会话 turn context；缺少任一证据不通过。事件时间仅用于判定任务区间重叠，不冒充宿主提供的执行耗时。
+取消测试要求宿主报告控制任务 running，并通过 close 事件或关联的 V2 宿主状态查询确认非 completed 的有效停止终态。规则必须有独立身份、完整材料摘要以及有效 completed 输出证据。模型继承同时核对 spawn 参数没有 model 覆盖、实际 spawn 模型及子会话 turn context；缺少任一证据不通过。事件时间仅用于判定任务区间重叠，不冒充宿主提供的执行耗时。
 
 Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action 实际 outcome 并等待已启动观察进程封存，之后上传固定 public 目录。它们不启动仓库脚本。审查和原始日志所在 private/Codex home 均不上传。独立汇总 job 从固定提交加载汇总入口，将报告只作为数据读取。
 
@@ -244,7 +244,72 @@ Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action
 - 已实现：手动触发、独立 fixture、原版 helper 复用、运行事件投影、六路门槛、取消证据判定、prepared 演练分支、长报告完整性校验及独立汇总。
 - 本地检查：新增 Node 测试覆盖无密钥/失败 outcome、缺失终态、模型继承证据缺失、材料摘要缺失、权限失败、长报告截断、日志字段过滤及真实 fixture 快照；测试是本地模拟和 helper 验证，不是云端成功证据。
 - 检查记录：新增测试与 actionlint 工作流校验已通过；扩展运行原有测试时共有 8 项失败，涉及 Windows 特殊文件名、符号链接权限、Git shell 模拟及 CRLF frontmatter 匹配。原有相关文件未修改，本轮不扩展修复；这些失败不作为本次云端能力不支持的证据。
-- 云端验证：未执行；本次未提交、推送或触发 Actions，暂无实际运行链接。
+- 初始实现阶段未执行云端验证；后续实际运行与复核见下方日期记录。
 - 当前接入结论：**原生方案暂不可接入（关键云端能力尚未验证，不表示已证实不支持）**。实际运行后由报告按证据给出三类结论之一；只有 native 完整演练及快照/权限通过，才可写“可直接接入”。
 
 本轮不移除本地自动审查、不修改生产 SKILL 调度规则，也不实现多实例执行器。
+
+### 2026-11-11 云端复核与修正
+
+首次运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42967024728 （提交 `72d95fd10606b3726aff22a38f4b458cfffc329d`）。工作流成功，能力并未通过：环境与长消息交付 PASS，完整演练 skipped。原始日志确认 skill 读取和源码写入拒绝成功，快照 helper 与临时写入失败，但旧汇总将这些操作全部标为 UNVERIFIED，存在证据采集遗漏。
+
+已按固定 CLI `0.167.1` 的协议实现修正：该版本不持久化 transient `exec_command_end` / `collab_*` 事件，应读取 `item_completed` 的 typed command/function output/activity；兼容 V2 `list_agents` 的真实状态。子会话元数据、父调用和子会话 turn context 用于核对身份及模型继承。缺少对应宿主证据仍保持 UNVERIFIED，不采用最终模型自述补齐。
+
+权限依据：[官方 permission profiles 文档](https://developers.openai.com/codex/permissions)。`:read-only` 不提供临时写入豁免。基线 probe 保持 read-only；只有门槛满足且快照失败时，在独立 prepared job 中使用 `capability-temp`：继承 `:read-only`，仅允许本次 `runtime-tmp` 写入，同时再次验证源码写入被拒绝。该调整只验证最小适配，不改变 skill 核心规则，不能得出原样直接接入的结论。
+
+失败诊断只保留固定分类（权限拒绝、范围不匹配、未知 helper 失败），不上传任意 stderr。增加事件类型计数帮助识别协议缺口，不上传原始会话日志。
+
+修正后运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474 （提交 `2462b60`），核对中；运行最终结论见后续记录。
+
+本次本地 17 项能力验证测试、`actionlint -shellcheck=` 与 `git diff --check` 通过。按用户要求停止本地自动 code-review，本次不启动。
+
+### 后续修正记录与验收口径
+
+- V2 fork 文件可能包含父会话元数据与历史。观察器按宿主 `subagent_history_start_ordinal` 排除继承范围；旧格式没有可靠边界时，不将其中事件计为 worker 自身证据。探测与演练的 worker 显式 `fork_turns: "none"`，仍不传 model，由宿主配置和自身 turn context 核对模型继承。
+- 同一 worker 的 legacy/typed/activity/session 元数据按运行时 thread ID 合并。V2 `list_agents` 可能省略较早完成任务，因此同时保留子会话真实 `task_complete` / `turn_complete` 的有效输出判定；不从父模型的总结补造终态。
+- 独立任务消息完整携带 SKILL 第 2 节的输出要求；缺少严重程度、文件或行号等仍视为无效，不放宽有效性标准。新增固定输出格式诊断，不发布原始 worker 日志。
+- 取消探测以专门的 `control_cancel` 身份关联宿主 running 与 interrupted 状态，不依赖模型在总结中声称取消成功。
+
+| 运行 | 验证提交 | 核对结果 |
+| --- | --- | --- |
+| [第一轮修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474) | `2462b60` | skill 与指令边界 PASS，快照和临时写入明确为权限失败；发现身份归属及 V2 状态采集遗漏 |
+| [第二轮修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42971009574) | `ccab697` | 采集到原生六路和模型上下文；随后发现 fork 继承历史归属风险，其并发记录不作为最终验收依据 |
+| [终态采集修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42971928999) | `f82e492` | 取消链路可关联；仍使用旧 fork 口径，不作为最终完整能力验收依据 |
+| [独立上下文验证](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42972580081) | `6367a95` | 并发、模型继承、取消与五路有效输出通过；Standards 为 completed / invalid_output，完整演练未启动 |
+| [输出约定修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42973379962) | `9419253` | 原生能力门槛和 prepared 完整演练通过；最终结论为需最小适配后接入 |
+
+当前本地针对性回归测试为 19 项通过，静态检查通过；测试覆盖协议投影、未授权输出伪造、fork 边界、身份合并、完成终态及取消门槛。云端验收通过与否只依赖实际 artifact，不以本地模拟测试代替。
+
+### 最终验收结果（2026-11-11）
+
+最终运行：[42973379962](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42973379962)，验证实现提交 `9419253c0f4942864c6fa826a791264fe27dff9e`。probe、assess-probe、rehearsal、report 四个 job 均成功。已下载并独立核对 `capability-probe`、`capability-probe-assessment`、`capability-rehearsal`、`capability-report`，不只依赖工作流绿色标记或模型自述。
+
+| 能力 | 只读 probe | 独立 prepared 演练 |
+| --- | --- | --- |
+| 环境与指定 skill 读取 | PASS | PASS |
+| 六路独立原生委派、有效终态及完整材料读取 | PASS | PASS |
+| 并发及模型继承 | PASS | PASS |
+| 取消（独立控制任务） | PASS | 未重复执行；采用 probe 证据 |
+| 原版快照 helper 在沙箱内构建 | FAIL：filesystem_permission_denied | 未重复执行；使用可信步骤预构建材料 |
+| 源码只读及必要临时写入 | FAIL：源码保护通过，但临时写入被拒绝 | PASS：源码写入被拒绝，runtime-tmp 写入成功 |
+| 指令边界 | PASS | PASS |
+| 长消息交付 | PASS | PASS |
+| 完整 skill 演练 | 未执行 | PASS（明确为适配演练） |
+
+两个 job 各有六个唯一规则 worker，全部 completed，实际模型均确认是 `gpt-6.1-sol`；每个 job 内六路 manifest/patch 摘要一致。两个最终交付均为完整 700 行，SHA-256 与准备值一致。控制任务由宿主状态确认在 06:36:30.718 UTC 为 running，06:36:36.322 UTC 为 interrupted。执行耗时接口不可用，未将事件时间跨度冒充 worker 执行耗时。
+
+prepared 报告按 Standards、AI Review Rules、Summary 交付，并核查出临时 fixture 的一个 Major：sample.js 第 1 行把 double 从乘二改成乘三。报告明确保留预构建目录、未宣称原版 helper 在只读沙箱内成功。
+
+**最终结论：需最小适配后接入。** 原生委派已证实可用，无需多进程执行器。正式接入应继续使用 skill 内原规则与 helper，并明确以下适配：可信准备步骤在 Codex 沙箱外预构建快照；调用方传入同一 manifest；命名权限只开放专用临时目录；调用方持有的材料由调用方负责生命周期；独立 worker 传递完整任务及 skill 输出约定，使用自身上下文验证模型。正式 skill 的预构建材料入口与清理约定仍需显式纳入接入改造，本次仅通过验证提示词演练，未修改 SKILL 核心规则，也未启用正式 PR skill 调用。
+
+PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 PR 触发方式及原 skill；按用户要求不启动本地自动审查。19 项本地针对性测试、工作流 actionlint 与 git diff 检查通过。最新验证实现的现有 PR 云端静态审查通过，且未报告有充分证据支持的新问题；该检查不替代本次独立能力验收。
+
+## 正式接入实施：第一阶段
+
+新增 skill 内的 `ci-review.mjs` 可信准备、材料读取、证据校验和报告发布入口，新增 CI context/result schema 与调用提示词。原 helper、过滤及规则正文保持不变；`ci-runtime.mjs` 共用宿主事件投影，验证流程继续独立保留。
+
+正式约定：固定 base/head，从 base 导出完整 skill；原 helper 在调用前构建快照，`materials` 与可信工具只读，仅 `runtime-tmp` 可写。主会话在仓库外 controller 启动；六路使用独立上下文并继承模型。材料归调用方持有，终态未知时保留，由 runner 生命周期回收。完整报告保存 artifact，findings 不阻断；执行、材料或证据不完整则检查失败。
+
+第一阶段仍保留现有通用 PR workflow。先合入可信入口，再在后续 PR 切换 execute/review/comment 三 job，避免 base 缺失入口时回退读取 head。若正式验收失败，保留原 workflow；上线故障回退 workflow 切换提交，不恢复本地自动审查，不启用多进程执行器。
+
+本地机械验证：`node --test .agents/skills/code-review/scripts/ci-review.test.mjs .agents/skills/code-review/scripts/ci-capability.test.mjs`，`actionlint -shellcheck=` 与 `git diff --check`。正式云端结果将在实际运行后补充，当前不标记完成。本次不启动本地自动 code-review。

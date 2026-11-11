@@ -1,17 +1,15 @@
-#!/usr/bin/env node
+import { CLI_VERSION, ACTION_SHA, RULES, inside, canonical, scanRollouts, assessWorkers, atomic, readBundle } from './ci-runtime.mjs'
+export { CLI_VERSION, ACTION_SHA, RULES, projectRecord } from './ci-runtime.mjs'
 // CI capability harness only. Production review policy remains in SKILL.md.
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  cpSync, existsSync, mkdirSync, readFileSync,
-  readdirSync, realpathSync, renameSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, readFileSync, readdirSync,
+  writeFileSync,
 } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const CLI_VERSION = '0.167.1'
-export const ACTION_SHA = '1d82a3dba7c7988ec71ecae1ed5b8e8db96495c5'
-export const RULES = ['standards', 'architect', 'devops', 'product_contract', 'runtime_performance', 'security']
 export const CHECKS = ['environment', 'skill', 'snapshot', 'delegation', 'concurrency_model', 'cancellation', 'permissions', 'instructions', 'rehearsal', 'delivery']
 const here = dirname(fileURLToPath(import.meta.url))
 const defaultSkill = dirname(here)
@@ -21,16 +19,6 @@ const json = path => JSON.parse(readFileSync(path, 'utf8'))
 const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n')
 const rulePath = id => id === 'standards' ? 'references/standards.md' : `references/ai_review_rules/${id}.md`
 const terminal = value => ['completed', 'errored', 'shutdown', 'cancelled', 'interrupted'].includes(value)
-const statusName = value => typeof value === 'string' ? value : Object.keys(value ?? {})[0] ?? 'unknown'
-const validOutput = status => {
-  const output = status?.completed
-  return typeof output === 'string' && (output.trim() === 'NO_FINDINGS' ||
-    /Critical|Major|Minor/.test(output) && /sample\.js/.test(output) && /\d+/.test(output))
-}
-const canonical = path => {
-  const actual = realpathSync.native(path)
-  return process.platform === 'win32' ? actual.toLowerCase() : actual
-}
 
 function run(cmd, args, cwd, extra = {}) {
   const result = spawnSync(cmd, args, { cwd, encoding: 'utf8', ...extra })
@@ -38,19 +26,13 @@ function run(cmd, args, cwd, extra = {}) {
   return result.stdout.trim()
 }
 
-function inside(root, candidate) {
-  const base = canonical(root)
-  const actual = canonical(candidate)
-  const rel = relative(base, actual)
-  if (!rel || isAbsolute(rel) || rel.split(sep).includes('..')) throw new Error('path outside capability root')
-  return actual
-}
-
 export function prepare(root, mode, skill = defaultSkill) {
   if (!['probe', 'native', 'prepared'].includes(mode)) throw new Error('invalid capability mode')
   if (existsSync(root)) throw new Error('capability root must not exist')
   mkdirSync(root, { recursive: true })
   for (const dir of ['private', 'public', 'fixture', 'runtime-tmp', 'codex-home']) mkdirSync(join(root, dir))
+  if (mode === 'prepared') writeFileSync(join(root, 'codex-home/config.toml'),
+    `[permissions.capability-temp]\nextends = ":read-only"\n[permissions.capability-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n`)
   cpSync(skill, join(root, 'skill'), { recursive: true })
   const fixture = join(root, 'fixture')
   run('git', ['init', '-q'], fixture)
@@ -82,7 +64,7 @@ export function prepare(root, mode, skill = defaultSkill) {
   const delivery = Array.from({ length: 700 }, (_, i) => `capability-delivery-line-${String(i).padStart(4, '0')}\n`).join('')
   writeFileSync(join(root, 'delivery-input.txt'), delivery)
   save(join(root, 'public/config.json'), {
-    mode, cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: 'read-only',
+    mode, cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: mode === 'prepared' ? 'temp-write-only' : 'read-only',
     safety: 'drop-sudo', endpoint: 'https://gptapi001.huasu.org/v1/responses',
     commit: process.env.GITHUB_SHA ?? 'local', base, root, manifestPath,
     run: process.env.GITHUB_RUN_ID ?? 'local', attempt: process.env.GITHUB_RUN_ATTEMPT ?? 'local',
@@ -124,13 +106,9 @@ export function operation(root, op) {
     } else if (RULES.some(id => op === `read-${id}`)) {
       const id = op.slice(5)
       const selected = json(join(root, 'private/selected.json')).manifestPath
-      inside(root, selected)
-      const manifest = json(selected)
-      const patches = manifest.layers.map(layer => readFileSync(inside(root, layer.patchPath)))
-      const rule = readFileSync(join(root, 'skill', rulePath(id)))
-      const standards = id === 'standards' ? manifest.standardSources.map(path => readFileSync(inside(join(root, 'fixture'), join(root, 'fixture', path)), 'utf8')).join('\n') : ''
-      result = { ...result, rule: id, manifestHash: digest(readFileSync(selected)), ruleHash: digest(rule), patchHash: digest(Buffer.concat(patches)) }
-      content = [rule.toString(), readFileSync(selected, 'utf8'), ...patches.map(patch => patch.toString()), standards].join('\n')
+      const { content: material, ...hashes } = readBundle(root, join(root, 'fixture'), selected, id)
+      result = { ...result, rule: id, ...hashes }
+      content = material
     } else if (op === 'write-source') {
       try {
         writeFileSync(join(root, 'fixture/sample.js'), '// sandbox write succeeded\n', { flag: 'a' })
@@ -147,93 +125,21 @@ export function operation(root, op) {
     result.status = 'FAIL'
     // Only fixture/helper errors, never credentials or arbitrary process output, enter public evidence.
     result.failure = ['EACCES', 'EPERM', 'EROFS'].includes(error.code) ? 'permission_denied' : 'operation_failed'
+    // Classify known helper diagnostics only; never copy arbitrary stderr into artifacts.
+    const message = String(error.message)
+    result.diagnostic = /EACCES|EPERM|EROFS|permission denied|read-only file system/i.test(message) ? 'filesystem_permission_denied' :
+      /scope mismatch/.test(message) ? 'snapshot_scope_mismatch' : 'helper_failed_unknown'
   }
   process.stdout.write(content + '\nCAPABILITY_EVIDENCE ' + JSON.stringify(result) + '\n')
   return result
 }
 
-// Do not publish arbitrary log text, command strings, prompts, env, tool output or agent messages.
-export function projectRecord(record, thread, root) {
-  const p = record.payload ?? {}
-  const base = { timestamp: record.timestamp, thread }
-  if (record.type === 'session_meta') return { ...base, type: 'session_meta', thread: p.id, parent: p.parent_thread_id, cli: p.cli_version }
-  if (record.type === 'turn_context') return { ...base, type: 'turn_context', model: p.model, sandbox: p.sandbox_policy?.type }
-  if (record.type === 'response_item' && p.type === 'function_call' && /(?:^|\.)spawn_agent$/.test(p.name)) {
-    try {
-      const args = JSON.parse(p.arguments)
-      return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model') }
-    } catch { return null }
-  }
-  if (record.type !== 'event_msg') return null
-  if (['task_started', 'turn_started', 'task_complete', 'turn_complete'].includes(p.type)) {
-    return { ...base, type: p.type.endsWith('started') ? 'worker_turn_started' : 'worker_turn_completed' }
-  }
-  if (/^collab_(agent_spawn|waiting|close|agent_interaction)_(begin|end)$/.test(p.type)) {
-    const out = { ...base, type: p.type }
-    for (const key of ['call_id', 'sender_thread_id', 'receiver_thread_id', 'new_thread_id', 'model', 'reasoning_effort']) {
-      if (typeof p[key] === 'string') out[key] = p[key]
-    }
-    if (p.status !== undefined) out.status = statusName(p.status)
-    if (p.statuses) {
-      out.statuses = Object.fromEntries(Object.entries(p.statuses).map(([id, value]) => [id, statusName(value)]))
-      out.valid_outputs = Object.fromEntries(Object.entries(p.statuses).map(([id, value]) => [id, validOutput(value)]))
-    }
-    // Only a fixed marker is retained, never the prompt itself.
-    if (p.prompt?.includes('CONTROL_CANCEL')) out.control = true
-    return out
-  }
-  if (p.type === 'exec_command_end') {
-    const command = p.command?.at(-1)
-    const config = json(join(root, 'public/config.json'))
-    if (command === `node ${join(root, 'skill/scripts/build-review-manifest.mjs')} --base ${config.base}`) {
-      return { ...base, type: 'operation', operation: 'build-snapshot', status: p.exit_code === 0 ? 'PASS' : 'FAIL', exitCode: p.exit_code }
-    }
-    const prefix = `node ${join(root, 'skill/scripts/ci-capability.mjs')} operation ${root} `
-    if (typeof command !== 'string' || !command.startsWith(prefix)) return null
-    const op = command.slice(prefix.length)
-    if (!['read-skill', 'build-snapshot', 'write-source', 'write-temp', 'read-instructions', ...RULES.map(id => `read-${id}`)].includes(op)) return null
-    const line = p.aggregated_output?.split('\n').find(line => line.startsWith('CAPABILITY_EVIDENCE '))
-    let evidence
-    try { evidence = JSON.parse(line.slice('CAPABILITY_EVIDENCE '.length)) } catch { return null }
-    if (evidence.operation !== op || !['PASS', 'FAIL'].includes(evidence.status)) return null
-    const safe = { ...base, type: 'operation', operation: op, status: evidence.status, exitCode: p.exit_code }
-    if (['permission_denied', 'operation_failed'].includes(evidence.failure)) safe.failure = evidence.failure
-    for (const key of ['hash', 'manifestHash', 'ruleHash', 'patchHash']) if (/^[a-f0-9]{64}$/.test(evidence[key])) safe[key] = evidence[key]
-    return safe
-  }
-  return null
-}
-
-function rolloutFiles(root) {
-  if (!existsSync(root)) return []
-  return readdirSync(root, { withFileTypes: true }).flatMap(entry => {
-    const path = join(root, entry.name)
-    return entry.isDirectory() ? rolloutFiles(path) : entry.isFile() && entry.name.endsWith('.jsonl') ? [path] : []
-  })
-}
-
-function atomic(path, value) {
-  const temporary = path + '.next'
-  save(temporary, value)
-  renameSync(temporary, path)
-}
-
 export async function observe(root) {
   const deadline = Date.now() + 45 * 60 * 1000
   while (Date.now() < deadline) {
-    const events = []
-    for (const file of rolloutFiles(join(root, 'codex-home/sessions'))) {
-      let thread
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
-        try {
-          const record = JSON.parse(line)
-          if (record.type === 'session_meta') thread = record.payload.id
-          const projected = projectRecord(record, thread, root)
-          if (projected) events.push(projected)
-        } catch { /* trailing partial record: next scan will retry */ }
-      }
-    }
+    const { events, inventory } = scanRollouts(root)
     atomic(join(root, 'public/events.json'), events)
+    atomic(join(root, 'public/event-types.json'), inventory)
     if (existsSync(join(root, 'private/outcome.json'))) {
       const outcome = json(join(root, 'private/outcome.json'))
       const safeOutcome = { action: ['success', 'failure', 'cancelled', 'skipped'].includes(outcome.action) ? outcome.action : 'unknown' }
@@ -264,28 +170,10 @@ export function assess(directory) {
     const records = opEvents(name)
     return records.some(e => e.status === 'FAIL' || e.exitCode !== 0) ? 'FAIL' : records.length ? 'PASS' : 'UNVERIFIED'
   }
-  const spawnEvents = events.filter(e => e.type === 'collab_agent_spawn_end' && e.new_thread_id)
-  const workers = RULES.map(rule => {
-    const reads = opEvents(`read-${rule}`).filter(e => e.status === 'PASS' && e.exitCode === 0 &&
-      /^[a-f0-9]{64}$/.test(e.manifestHash) && e.patchHash === config.patchHash && e.ruleHash === config.ruleHashes?.[rule])
-    const spawn = spawnEvents.find(e => reads.some(read => read.thread === e.new_thread_id))
-    const statuses = spawn ? events.flatMap(e => [
-      ...(e.statuses?.[spawn.new_thread_id] ? [{ status: e.statuses[spawn.new_thread_id], timestamp: e.timestamp, valid: e.valid_outputs?.[spawn.new_thread_id] === true }] : []),
-      ...(e.receiver_thread_id === spawn.new_thread_id && e.status ? [{ status: e.status, timestamp: e.timestamp }] : []),
-    ]) : []
-    const end = statuses.find(e => e.status === 'completed' && e.valid)
-    const context = spawn ? events.filter(e => e.type === 'turn_context' && e.thread === spawn.new_thread_id) : []
-    const started = spawn ? events.find(e => e.type === 'worker_turn_started' && e.thread === spawn.new_thread_id) : null
-    const completed = spawn ? events.find(e => e.type === 'worker_turn_completed' && e.thread === spawn.new_thread_id) : null
-    return { rule, id: spawn?.new_thread_id, spawn: spawn?.timestamp, end: end?.timestamp,
-      runningFrom: started?.timestamp, runningUntil: completed?.timestamp,
-      status: end ? 'completed' : statuses.at(-1)?.status === 'completed' ? 'completed / invalid_output' : statuses.at(-1)?.status ?? 'unknown', model: spawn?.model,
-      modelConfirmed: spawn?.model === config.model && context.length > 0 && context.every(e => e.model === config.model) &&
-        events.some(e => e.type === 'spawn_arguments' && e.call_id === spawn?.call_id && e.overridesModel === false),
-      reads, duration: '不可用' }
-  })
+  const { workers, spawnEvents } = assessWorkers(events, config)
   const roots = events.filter(e => e.type === 'session_meta' && !e.parent)
-  const rootContext = events.some(e => e.type === 'turn_context' && roots.some(root => root.thread === e.thread) && e.model === config.model && e.sandbox === 'read-only')
+  const rootContext = events.some(e => e.type === 'turn_context' && roots.some(root => root.thread === e.thread) && e.model === config.model &&
+    (e.sandbox === 'read-only' || config.sandbox === 'temp-write-only' && e.sandbox === 'workspace-write'))
   result.environment = outcome === 'failure' ? 'FAIL' : outcome === 'success' && rootContext && events.some(e => e.type === 'session_meta' && e.cli === CLI_VERSION) ? 'PASS' : 'UNVERIFIED'
   result.skill = op('read-skill') === 'PASS' && opEvents('read-skill').some(e => e.hash === config.skillHash) ? 'PASS' : op('read-skill') === 'FAIL' ? 'FAIL' : 'UNVERIFIED'
   result.snapshot = op('build-snapshot')
@@ -297,8 +185,9 @@ export function assess(directory) {
     Date.parse(a.runningFrom) < Date.parse(b.runningUntil) && Date.parse(b.runningFrom) < Date.parse(a.runningUntil)))
   result.concurrency_model = overlapping && workers.every(w => w.modelConfirmed) ? 'PASS' : 'UNVERIFIED'
   const control = spawnEvents.find(e => e.control && !workers.some(w => w.id === e.new_thread_id))
-  const cancelled = control && events.some(e => e.type === 'collab_close_end' && e.receiver_thread_id === control.new_thread_id && terminal(e.status) && e.status !== 'completed')
-  const running = control && (control.status === 'running' || events.some(e => e.statuses?.[control.new_thread_id] === 'running' || e.receiver_thread_id === control.new_thread_id && e.status === 'running'))
+  const hostControl = status => events.some(e => e.type === 'host_status' && e.agents?.some(a => a.path === control?.path && a.status === status))
+  const cancelled = control && (hostControl('interrupted') || events.some(e => e.type === 'collab_close_end' && e.receiver_thread_id === control.new_thread_id && terminal(e.status) && e.status !== 'completed'))
+  const running = control && (hostControl('running') || control.status === 'running' || events.some(e => e.statuses?.[control.new_thread_id] === 'running' || e.receiver_thread_id === control.new_thread_id && e.status === 'running'))
   result.cancellation = cancelled && running ? 'PASS' : 'UNVERIFIED'
   result.permissions = op('write-source') === 'FAIL' || op('write-temp') === 'FAIL' ? 'FAIL' :
     op('write-source') === 'PASS' && op('write-temp') === 'PASS' && result.delegation === 'PASS' ? 'PASS' : 'UNVERIFIED'
@@ -306,7 +195,7 @@ export function assess(directory) {
   result.delivery = final && digest(final.delivery_payload) === config.deliveryHash && final.delivery_payload.length === config.deliveryLength && config.deliveryLength > 12000 ? 'PASS' : 'UNVERIFIED'
   if (config.mode !== 'probe') {
     result.rehearsal = outcome === 'success' && result.skill === 'PASS' && result.delegation === 'PASS' && result.concurrency_model === 'PASS' &&
-      (config.mode === 'prepared' || result.snapshot === 'PASS') &&
+      (config.mode === 'prepared' || result.snapshot === 'PASS') && result.permissions === 'PASS' &&
       final && ['Standards', 'AI Review Rules', 'Summary'].every(label => final.report.includes(label)) ? 'PASS' : 'UNVERIFIED'
   }
   const nativeReady = ['environment', 'skill', 'delegation', 'concurrency_model', 'cancellation', 'instructions', 'delivery'].every(id => result[id] === 'PASS') && op('write-source') === 'PASS'
