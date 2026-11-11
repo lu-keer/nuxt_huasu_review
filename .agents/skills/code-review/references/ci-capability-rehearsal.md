@@ -1,5 +1,7 @@
 # CI skill 完整演练
 
+严格调度：可信配置固定两个子任务名额，不含主会话。维护 pending/active 队列，先连续提交两个 spawn；收到宿主完成事件就立即补位，不先 list_agents/wait_agent 再确认一次。只有 active 已满且无已知完成事件时才查询或等待。全部六路提交后再统一等待收尾。每个 worker 显式 fork_turns: "none"，不传 model 或 reasoning_effort；真实配置和请求/返回由观察器核验，缺失时不宣称通过。
+
 本轮与能力探测处于不同 job，不复用旧任务、不重试失败规则。只审指定临时 fixture，真实项目不得修改。不读取认证配置、完整环境变量或代理日志，不安装依赖、不访问网络。
 
 六路原生 worker 均显式传 `fork_turns: "none"`，不复制父会话历史，仍不传 model。各任务消息完整给出规则路径、同一 manifest、读取命令、预算及只读边界；材料仍由 worker 自行读取。

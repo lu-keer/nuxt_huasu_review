@@ -76,6 +76,23 @@ test('cancel request without host terminal does not unlock rehearsal', t => {
   assert.equal(assess(dir).nativeReady, false)
 })
 
+test('missing bounded control execution never unlocks rehearsal', t => {
+  const { dir, events } = evidence(t)
+  save(join(dir, 'events.json'), events.filter(e => e.type !== 'control_hold'))
+  const report = assess(dir)
+  assert.equal(report.nativeReady, false)
+  assert.equal(report.controls.status, 'UNVERIFIED')
+})
+
+test('control tasks exceeding 30 seconds cannot certify native concurrency', t => {
+  const { dir, events } = evidence(t)
+  const end = events.find(e => e.type === 'worker_turn_completed' && e.thread === 'control-hold-0')
+  end.timestamp = new Date(Date.parse(end.timestamp) + 60000).toISOString()
+  save(join(dir, 'events.json'), events)
+  assert.equal(assess(dir).nativeReady, false)
+  assert.equal(assess(dir).controls.bounded, false)
+})
+
 test('late wait observations do not turn sequential worker execution into concurrency', t => {
   const { dir, events } = evidence(t)
   save(join(dir, 'events.json'), events.filter(e => !e.type.startsWith('worker_turn_')))

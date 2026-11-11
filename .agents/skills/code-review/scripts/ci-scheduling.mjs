@@ -50,17 +50,18 @@ export function assessScheduling(events, config, contract, rules = RULE_IDS) {
     entries.push({ rule, id, request, returned, start, end })
   }
   if (new Set(entries.map(e => e.id)).size !== rules.length) unknown('ROSTER_UNVERIFIED')
-  const timeline = entries.flatMap(e => Number.isFinite(time(e.start)) && Number.isFinite(time(e.end)) ? [{ at: time(e.start), delta: 1 }, { at: time(e.end), delta: -1 }] : []).sort((a, b) => a.at - b.at || a.delta - b.delta)
+  const timeline = entries.flatMap(e => Number.isFinite(time(e.start)) && Number.isFinite(time(e.end)) && time(e.end) > time(e.start) ? [{ at: time(e.start), delta: 1 }, { at: time(e.end), delta: -1 }] : []).sort((a, b) => a.at - b.at || a.delta - b.delta)
   let active = 0, maximum = 0
   for (const event of timeline) { active += event.delta; maximum = Math.max(maximum, active) }
   if (capacityVerified && maximum > contract.workerCapacity) unknown('CAPACITY_SEMANTICS_CONFLICT')
-  const waits = events.filter(e => e.type === 'tool_request' && e.thread === parent && ['wait', 'wait_agent', 'list_agents'].includes(e.tool))
+  const firstRequestOrder = Math.min(...requests.map(e => e.order))
+  const waits = events.filter(e => e.type === 'tool_request' && e.thread === parent && e.order >= firstRequestOrder && ['wait', 'wait_agent', 'list_agents'].includes(e.tool))
   const extraOpenAt = (child, at) => !events.some(e =>
     e.type === 'worker_turn_completed' && e.thread === child.thread && time(e) <= at ||
     e.type === 'host_status' && time(e) <= at && e.agents?.some(a => a.path === child.path && terminal.has(a.status)))
   for (const wait of waits) {
     if (!wait.call_id || !events.some(e => e.thread === parent && e.call_id === wait.call_id &&
-      (e.type === 'tool_return' || e.type === 'host_status') && Number.isSafeInteger(e.order) && e.order > wait.order)) unknown('WAIT_RETURN_UNVERIFIED')
+      (e.type === 'tool_return' || e.type === 'host_status' || e.type === 'collab_waiting_end' && e.returned === true) && Number.isSafeInteger(e.order) && e.order > wait.order)) unknown('WAIT_RETURN_UNVERIFIED')
   }
   if (capacityVerified && entries.length === rules.length) {
     for (const wait of waits) {
@@ -68,7 +69,13 @@ export function assessScheduling(events, config, contract, rules = RULE_IDS) {
       const pending = entries.some(e => e.request.order > wait.order)
       if (!pending) continue
       const inflight = entries.some(e => e.request.order < wait.order && e.returned.order > wait.order)
-      const open = entries.filter(e => e.request.order < wait.order && time(e.end) > time(wait)).length
+      // A child ending is not proof the parent already received that fact.
+      // The first status query after filling capacity is legitimate even for fast tasks.
+      const knownStopped = entry => events.some(e => e.thread === parent && e.order < wait.order && (
+        e.type === 'host_status' && e.agents?.some(a => a.path === `/root/${entry.rule}` && terminal.has(a.status)) ||
+        e.type === 'collab_waiting_end' && terminal.has(e.statuses?.[entry.id]) ||
+        e.type === 'agent_activity' && e.id === entry.id && ['completed', 'interrupted', 'errored', 'shutdown'].includes(e.kind)))
+      const open = entries.filter(e => e.request.order < wait.order && !knownStopped(e)).length
       // Full capacity permits waiting; a finished fast task permits immediate replenishment.
       const extra = events.some(e => e.type === 'session_meta' && e.parent === parent && !entries.some(w => w.id === e.thread) &&
         (!Number.isFinite(time(e)) || time(e) <= time(wait) && extraOpenAt(e, time(wait))))

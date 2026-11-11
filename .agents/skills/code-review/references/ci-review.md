@@ -12,6 +12,7 @@
 - 最终六路结束后显式调用 list_agents；早期任务退出列表时，真实子会话完成事件仍可作为证据。不用模型自行陈述代替运行时证据。
 
 - 本次为严格调度验收，可信准备固定两个 worker 名额（不含主会话）；不得传 model 或 reasoning_effort，必须显式 fork_turns: "none"。先提交全部当前可启动任务，只有名额满额或提交调用尚未返回时才等待；确认任务停止后立即提交 pending 任务。快速任务自然完成不要求人为延长运行。不得以少量区间重叠宣称调度通过；可信校验器独立核验请求、返回、容量和实际配置，证据不足则整体未完成。
+- 调度队列固定 standards、architect、devops、product_contract、runtime_performance、security。维护 active 名单：首先连续提交两个 spawn，不在其中插入状态查询；收到宿主完成事件就立即移出 active 并提交下一 pending，不先调用 list_agents 或 wait_agent 再确认一次。只有 active 已满两个且当前没有已知完成事件时才查询/等待。任务自然完成是补位机会，不是提前等待的理由。全部六路提交后再按预算等待收尾。
 
 最终消息仅为符合 schema 的 JSON：status 为 complete 或 incomplete；report 为 SKILL 的完整中文 Standards、AI Review Rules、Summary 报告，不截断；tasks 列出实际 rule、agent（原生身份或路径）、status；findings 只包含核实保留的 finding（严重程度、文件、行号、标题、关键代码、触发条件、影响）。报告包含剔除/合并数量、所有必要任务完成情况和材料保留情况。不输出评分、默认修复或通用保证。
 

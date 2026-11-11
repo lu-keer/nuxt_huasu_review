@@ -39,7 +39,7 @@ jobs:
           responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
           codex-version: 0.167.1
           codex-home: ${{ runner.temp }}/codex-skill-capability/codex-home
-          working-directory: ${{ runner.temp }}/codex-skill-capability/fixture
+          working-directory: ${{ runner.temp }}/codex-skill-capability/controller
           model: gpt-6.1-sol
           effort: low
           sandbox: read-only
@@ -128,7 +128,7 @@ jobs:
           responses-api-endpoint: https://gptapi001.huasu.org/v1/responses
           codex-version: 0.167.1
           codex-home: ${{ runner.temp }}/codex-skill-capability/codex-home
-          working-directory: ${{ runner.temp }}/codex-skill-capability/fixture
+          working-directory: ${{ runner.temp }}/codex-skill-capability/controller
           model: gpt-6.1-sol
           effort: low
           permission-profile: ${{ needs.assess-probe.outputs.rehearsal_mode == 'prepared' && 'capability-temp' || ':read-only' }}

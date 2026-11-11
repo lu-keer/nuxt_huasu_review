@@ -33,7 +33,7 @@ export function prepare(root, mode, skill = defaultSkill) {
   if (existsSync(root)) throw new Error('capability root must not exist')
   mkdirSync(root, { recursive: true })
   for (const dir of ['private', 'public', 'fixture', 'controller', 'runtime-tmp', 'codex-home']) mkdirSync(join(root, dir))
-  writeFileSync(join(root, 'codex-home/config.toml'), `[agents]\nmax_concurrent_threads_per_session = ${WORKER_CAPACITY}\n` + (mode === 'prepared' ?
+  writeFileSync(join(root, 'codex-home/config.toml'), `project_doc_max_bytes = 0\n[agents]\nmax_concurrent_threads_per_session = ${WORKER_CAPACITY}\n` + (mode === 'prepared' ?
     `[permissions.capability-temp]\nextends = ":read-only"\n[permissions.capability-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n` : ''))
   cpSync(skill, join(root, 'skill'), { recursive: true })
   const fixture = join(root, 'fixture')
