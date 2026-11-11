@@ -42,11 +42,11 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 
 正式验收失败不合入 workflow 切换；上线故障回退 workflow 切换提交。不恢复本地自动审查，不自动启用多进程执行器。
 
-本地机械验证：`node --test .agents/skills/code-review/scripts/ci-review.test.mjs .agents/skills/code-review/scripts/ci-capability.test.mjs`（28 项）、`actionlint -shellcheck=`、`git diff --check` 均通过。不启动本地自动 code-review。
+本地机械验证：`node --test .agents/skills/code-review/scripts/ci-review.test.mjs .agents/skills/code-review/scripts/ci-capability.test.mjs`（29 项）、`actionlint -shellcheck=`、`git diff --check` 均通过。不启动本地自动 code-review。
 
 | 正式验收项目 | 当前记录 |
 | --- | --- |
-| 共用模块抽取后的能力回归 | [42980002970](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42980002970)，运行中 |
+| 共用模块抽取后的能力回归 | [42980002970](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42980002970)，通过：六路身份/模型/终态及 prepared 演练已核对 |
 | 正式普通代码及零文本路径 | 待执行 |
 | 六路真实身份、完整材料、模型和终态 | 待正式运行核对 |
 | 已知缺陷 finding 且检查成功 | 待执行 |

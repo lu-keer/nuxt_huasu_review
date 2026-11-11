@@ -98,6 +98,28 @@ test('documentation and excluded test-only changes generate a completed zero-wor
   assert.ok(existsSync(join(f.root, 'public/observer-complete')))
 })
 
+test('trusted material operations verify context and reject changed patch without fallback', t => {
+  const f = fixture(t)
+  const c = prepareReview(f.repo, f.root, f.base, f.head)
+  const operation = id => spawnSync(process.execPath, [join(f.root, 'skill/scripts/ci-review.mjs'), 'operation', f.root, id], { encoding: 'utf8' })
+  assert.equal(operation('read-skill').status, 0)
+  for (const rule of RULES) {
+    const read = operation(`read-${rule}`)
+    assert.equal(read.status, 0, read.stdout)
+    assert.match(read.stdout, new RegExp(c.manifestHash))
+    assert.match(read.stdout, /widget.ts/)
+  }
+  const m = JSON.parse(readFileSync(c.manifestPath))
+  writeFileSync(m.layers[0].patchPath, 'tampered patch')
+  const bad = operation('read-architect')
+  assert.equal(bad.status, 1)
+  assert.match(bad.stdout, /"status":"FAIL"/)
+  assert.doesNotMatch(bad.stdout, /tampered patch/)
+  const contextPath = join(f.root, 'private/context.json'), context = JSON.parse(readFileSync(contextPath))
+  context.head = 'd'.repeat(40); save(contextPath, context)
+  assert.equal(operation('read-skill').status, 1)
+})
+
 function runtimeEvidence(t) {
   const root = temp(t), output = join(root, 'assessment')
   const config = { base: 'a'.repeat(40), head: 'b'.repeat(40), run: '10', attempt: '1', model: 'gpt-6.1-sol', textFileCount: 1, reviewFiles: ['widget.ts'],
