@@ -4,6 +4,8 @@
 
 本轮允许对临时 fixture 做明确列出的权限测试，这不属于规则 worker 的复现实验。不得修改真实项目，不读取认证文件、完整环境变量或代理日志，不安装依赖、不访问网络、不调用其他模型或执行新的 codex 进程。
 
+所有原生 worker（包括控制任务）显式传 `fork_turns: "none"`，不复制父会话历史；仍不传 model，模型继承由宿主配置和子会话实际 turn context 验证。每路任务消息必须完整给出可信规则、manifest、读取命令和预算。控制任务固定命名 `control_cancel`。
+
 依次执行：
 
 1. 原样执行追加的 `read-skill`、`build-snapshot`、`write-source`、`write-temp`、`read-instructions` 命令。保留真实退出码；失败不重试、不提升权限。build-snapshot 失败后不得宣称原版 helper 可用。

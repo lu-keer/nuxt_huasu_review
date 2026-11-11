@@ -218,7 +218,7 @@ test('V2 runtime child metadata and host status prove identities without legacy 
   assert.equal(assess(dir).checks.delegation, 'UNVERIFIED')
 })
 
-test('response outputs require matched host calls and fork metadata cannot overwrite owner', async t => {
+test('legacy fork history without a trustworthy boundary supplies no worker evidence', async t => {
   const root = temporary(t)
   for (const dir of ['public', 'private', 'codex-home/sessions']) mkdirSync(join(root, dir), { recursive: true })
   writeFileSync(join(root, 'delivery-input.txt'), 'delivery')
@@ -235,7 +235,7 @@ test('response outputs require matched host calls and fork metadata cannot overw
   await observe(root)
   const events = JSON.parse(readFileSync(join(root, 'public/events.json')))
   assert.ok(events.every(e => e.thread === 'child'))
-  assert.equal(events.find(e => e.type === 'host_status').agents[0].valid, true)
+  assert.deepEqual(events.map(e => e.type), ['session_meta'])
 })
 
 test('partial typed spawn and V2 metadata merge by runtime identity', t => {
@@ -264,4 +264,27 @@ test('durable child completion proves a terminal output after list_agents retire
   const projected = projectRecord({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'NO_FINDINGS' } }, 'child', dir)
   assert.equal(projected.valid, true)
   assert.doesNotMatch(JSON.stringify(projected), /NO_FINDINGS/)
+})
+
+test('ordinal boundary excludes inherited activity and matched response outputs retain real status', async t => {
+  const root = temporary(t)
+  for (const dir of ['public', 'private', 'codex-home/sessions']) mkdirSync(join(root, dir), { recursive: true })
+  writeFileSync(join(root, 'delivery-input.txt'), 'delivery')
+  save(join(root, 'private/final.json'), { report: 'fixture', delivery_payload: 'delivery' })
+  save(join(root, 'private/outcome.json'), { action: 'success' })
+  const records = [
+    { type: 'session_meta', payload: { id: 'child', parent_thread_id: 'parent', subagent_history_start_ordinal: 10 } },
+    { ordinal: 1, type: 'event_msg', payload: { type: 'task_started' } },
+    { ordinal: 2, type: 'turn_context', payload: { model: 'parent-model' } },
+    { ordinal: 10, type: 'event_msg', payload: { type: 'task_started' } },
+    { ordinal: 11, type: 'turn_context', payload: { model: 'child-model' } },
+    { ordinal: 12, type: 'response_item', payload: { type: 'function_call', name: 'collaboration.list_agents', call_id: 'list', arguments: '{}' } },
+    { ordinal: 13, type: 'response_item', payload: { type: 'function_call_output', call_id: 'list', output: JSON.stringify({ agents: [{ agent_name: '/root/standards', agent_status: { completed: 'NO_FINDINGS' } }] }) } },
+  ]
+  writeFileSync(join(root, 'codex-home/sessions/child.jsonl'), records.map(r => JSON.stringify(r)).join('\n'))
+  await observe(root)
+  const events = JSON.parse(readFileSync(join(root, 'public/events.json')))
+  assert.equal(events.filter(e => e.type === 'worker_turn_started').length, 1)
+  assert.deepEqual(events.filter(e => e.type === 'turn_context').map(e => e.model), ['child-model'])
+  assert.equal(events.find(e => e.type === 'host_status').agents[0].valid, true)
 })

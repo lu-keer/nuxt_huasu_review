@@ -2,6 +2,8 @@
 
 本轮与能力探测处于不同 job，不复用旧任务、不重试失败规则。只审指定临时 fixture，真实项目不得修改。不读取认证配置、完整环境变量或代理日志，不安装依赖、不访问网络。
 
+六路原生 worker 均显式传 `fork_turns: "none"`，不复制父会话历史，仍不传 model。各任务消息完整给出规则路径、同一 manifest、读取命令、预算及只读边界；材料仍由 worker 自行读取。
+
 先执行调用方给出的 read-skill 命令读取可信 SKILL.md，以及 write-source、write-temp 权限探测。prepared 模式仅开放 runtime-tmp 写入，源码必须保持只读；该权限适配不能表述为原始 read-only 全部通过。按其中流程执行一次完整审查。调用方追加了两种模式之一：
 
 - native：在 fixture cwd 直接执行原版 build-review-manifest.mjs --base 命令，遵循其真实退出码。失败即停止演练，不自行切换 prepared。

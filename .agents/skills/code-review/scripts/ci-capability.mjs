@@ -283,9 +283,14 @@ export async function observe(root) {
     for (const file of rolloutFiles(join(root, 'codex-home'))) {
       let thread
       const calls = new Map()
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const records = readFileSync(file, 'utf8').split('\n').flatMap(line => {
+        try { return [JSON.parse(line)] } catch { return [] }
+      })
+      const meta = records.find(r => r.type === 'session_meta')
+      const inherited = records.some(r => r.type === 'session_meta' && r.payload.id !== meta?.payload.id)
+      const boundary = meta?.payload.subagent_history_start_ordinal
+      for (const record of records) {
         try {
-          const record = JSON.parse(line)
           const kind = `${record.type}/${record.payload?.type ?? ''}/${record.payload?.item?.type ?? ''}`
           inventory[kind] = (inventory[kind] ?? 0) + 1
           // Forked rollouts embed parent metadata/history. The file's first
@@ -293,6 +298,12 @@ export async function observe(root) {
           if (record.type === 'session_meta') {
             if (thread) continue
             thread = record.payload.id
+          } else if (Number.isSafeInteger(boundary)) {
+            if (!Number.isSafeInteger(record.ordinal) || record.ordinal < boundary) continue
+          } else if (inherited) {
+            // Legacy physical forks lack a reliable ordinal boundary. Fail closed
+            // instead of assigning inherited parent activity to this worker.
+            continue
           }
           const projected = projectRecord(record, thread, root, calls)
           if (projected) events.push(projected)
