@@ -262,3 +262,44 @@ Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action
 修正后运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474 （提交 `2462b60`），核对中；运行最终结论见后续记录。
 
 本次本地 17 项能力验证测试、`actionlint -shellcheck=` 与 `git diff --check` 通过。按用户要求停止本地自动 code-review，本次不启动。
+
+### 后续修正记录与验收口径
+
+- V2 fork 文件可能包含父会话元数据与历史。观察器按宿主 `subagent_history_start_ordinal` 排除继承范围；旧格式没有可靠边界时，不将其中事件计为 worker 自身证据。探测与演练的 worker 显式 `fork_turns: "none"`，仍不传 model，由宿主配置和自身 turn context 核对模型继承。
+- 同一 worker 的 legacy/typed/activity/session 元数据按运行时 thread ID 合并。V2 `list_agents` 可能省略较早完成任务，因此同时保留子会话真实 `task_complete` / `turn_complete` 的有效输出判定；不从父模型的总结补造终态。
+- 独立任务消息完整携带 SKILL 第 2 节的输出要求；缺少严重程度、文件或行号等仍视为无效，不放宽有效性标准。新增固定输出格式诊断，不发布原始 worker 日志。
+- 取消探测以专门的 `control_cancel` 身份关联宿主 running 与 interrupted 状态，不依赖模型在总结中声称取消成功。
+
+| 运行 | 验证提交 | 核对结果 |
+| --- | --- | --- |
+| [第一轮修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474) | `2462b60` | skill 与指令边界 PASS，快照和临时写入明确为权限失败；发现身份归属及 V2 状态采集遗漏 |
+| [第二轮修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42971009574) | `ccab697` | 采集到原生六路和模型上下文；随后发现 fork 继承历史归属风险，其并发记录不作为最终验收依据 |
+| [终态采集修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42971928999) | `f82e492` | 取消链路可关联；仍使用旧 fork 口径，不作为最终完整能力验收依据 |
+| [独立上下文验证](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42972580081) | `6367a95` | 并发、模型继承、取消与五路有效输出通过；Standards 为 completed / invalid_output，完整演练未启动 |
+| [输出约定修正](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42973379962) | `9419253` | 原生能力门槛和 prepared 完整演练通过；最终结论为需最小适配后接入 |
+
+当前本地针对性回归测试为 19 项通过，静态检查通过；测试覆盖协议投影、未授权输出伪造、fork 边界、身份合并、完成终态及取消门槛。云端验收通过与否只依赖实际 artifact，不以本地模拟测试代替。
+
+### 最终验收结果（2026-11-11）
+
+最终运行：[42973379962](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42973379962)，验证实现提交 `9419253c0f4942864c6fa826a791264fe27dff9e`。probe、assess-probe、rehearsal、report 四个 job 均成功。已下载并独立核对 `capability-probe`、`capability-probe-assessment`、`capability-rehearsal`、`capability-report`，不只依赖工作流绿色标记或模型自述。
+
+| 能力 | 只读 probe | 独立 prepared 演练 |
+| --- | --- | --- |
+| 环境与指定 skill 读取 | PASS | PASS |
+| 六路独立原生委派、有效终态及完整材料读取 | PASS | PASS |
+| 并发及模型继承 | PASS | PASS |
+| 取消（独立控制任务） | PASS | 未重复执行；采用 probe 证据 |
+| 原版快照 helper 在沙箱内构建 | FAIL：filesystem_permission_denied | 未重复执行；使用可信步骤预构建材料 |
+| 源码只读及必要临时写入 | FAIL：源码保护通过，但临时写入被拒绝 | PASS：源码写入被拒绝，runtime-tmp 写入成功 |
+| 指令边界 | PASS | PASS |
+| 长消息交付 | PASS | PASS |
+| 完整 skill 演练 | 未执行 | PASS（明确为适配演练） |
+
+两个 job 各有六个唯一规则 worker，全部 completed，实际模型均确认是 `gpt-6.1-sol`；每个 job 内六路 manifest/patch 摘要一致。两个最终交付均为完整 700 行，SHA-256 与准备值一致。控制任务由宿主状态确认在 06:36:30.718 UTC 为 running，06:36:36.322 UTC 为 interrupted。执行耗时接口不可用，未将事件时间跨度冒充 worker 执行耗时。
+
+prepared 报告按 Standards、AI Review Rules、Summary 交付，并核查出临时 fixture 的一个 Major：sample.js 第 1 行把 double 从乘二改成乘三。报告明确保留预构建目录、未宣称原版 helper 在只读沙箱内成功。
+
+**最终结论：需最小适配后接入。** 原生委派已证实可用，无需多进程执行器。正式接入应继续使用 skill 内原规则与 helper，并明确以下适配：可信准备步骤在 Codex 沙箱外预构建快照；调用方传入同一 manifest；命名权限只开放专用临时目录；调用方持有的材料由调用方负责生命周期；独立 worker 传递完整任务及 skill 输出约定，使用自身上下文验证模型。正式 skill 的预构建材料入口与清理约定仍需显式纳入接入改造，本次仅通过验证提示词演练，未修改 SKILL 核心规则，也未启用正式 PR skill 调用。
+
+PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 PR 触发方式及原 skill；按用户要求不启动本地自动审查。19 项本地针对性测试、工作流 actionlint 与 git diff 检查通过。最新验证实现的现有 PR 云端静态审查通过，且未报告有充分证据支持的新问题；该检查不替代本次独立能力验收。
