@@ -333,7 +333,7 @@ export function assess(directory) {
   const activities = events.filter(e => e.type === 'agent_activity')
   // V2 exposes thread identity/model in activity and real status via list_agents.
   // Match through runtime-owned path/ID, never through the final model report.
-  const spawnEvents = [...events.filter(e => e.type === 'collab_agent_spawn_end' && e.new_thread_id),
+  const spawnRecords = [...events.filter(e => e.type === 'collab_agent_spawn_end' && e.new_thread_id),
     ...activities.filter(e => e.kind === 'started').map(e => ({ ...e, new_thread_id: e.id,
       control: events.some(a => a.type === 'spawn_arguments' && a.call_id === e.call_id && a.control) })),
     ...events.filter(e => e.type === 'session_meta' && e.parent && e.path).flatMap(e => {
@@ -342,6 +342,11 @@ export function assess(directory) {
       const context = events.find(a => a.type === 'turn_context' && a.thread === e.thread)
       return [{ ...e, new_thread_id: e.thread, call_id: args.call_id, control: args.control, model: context?.model }]
     })]
+  // Different durable/legacy sources can describe the same worker. Merge by
+  // runtime identity so an earlier partial spawn cannot hide its V2 path.
+  const spawnEvents = [...new Set(spawnRecords.map(e => e.new_thread_id))].map(id =>
+    Object.assign({}, ...spawnRecords.filter(e => e.new_thread_id === id)
+      .map(e => Object.fromEntries(Object.entries(e).filter(([, value]) => value !== undefined && value !== null)))))
   const workers = RULES.map(rule => {
     const reads = opEvents(`read-${rule}`).filter(e => e.status === 'PASS' && e.exitCode === 0 &&
       /^[a-f0-9]{64}$/.test(e.manifestHash) && e.patchHash === config.patchHash && e.ruleHash === config.ruleHashes?.[rule])

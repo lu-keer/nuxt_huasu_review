@@ -210,7 +210,7 @@ CI 验收完成后：
 | 模型 / effort | `gpt-6.1-sol` / `low` |
 | endpoint | 沿用 `https://gptapi001.huasu.org/v1/responses` |
 | 权限 | `contents: read`，无评论写入权限 |
-| sandbox / safety | `read-only` / `drop-sudo` |
+| sandbox / safety | probe 为 `read-only`；prepared 演练为 `capability-temp`（只读继承，仅 runtime-tmp 可写）；`drop-sudo` |
 | 运行环境 | `ubuntu-latest`；每个 Codex job 外层 40 分钟 |
 | 子代理开关 | 不添加；所选 CLI 的 `features list` 显示 `multi_agent` 为 stable、默认 true |
 
@@ -233,7 +233,7 @@ CI 验收完成后：
 
 模型最终消息写入 private 目录。观察进程只输出符合 schema、经过凭据形状脱敏的 fixture 报告；长交付文本必须与准备阶段生成的内容完全一致，否则不发布该文本并标记未验证。父模型自行声称六路完成不能让门槛通过。记录不足、事件格式变化或模型通过无法关联的工具封装调用时，一律 `UNVERIFIED`，不猜测成功。
 
-取消测试要求宿主报告控制任务 running，并在 close 事件中确认非 completed 的有效停止终态。规则必须有独立身份、完整材料摘要以及有效 completed 输出证据。模型继承同时核对 spawn 参数没有 model 覆盖、实际 spawn 模型及子会话 turn context；缺少任一证据不通过。事件时间仅用于判定任务区间重叠，不冒充宿主提供的执行耗时。
+取消测试要求宿主报告控制任务 running，并通过 close 事件或关联的 V2 宿主状态查询确认非 completed 的有效停止终态。规则必须有独立身份、完整材料摘要以及有效 completed 输出证据。模型继承同时核对 spawn 参数没有 model 覆盖、实际 spawn 模型及子会话 turn context；缺少任一证据不通过。事件时间仅用于判定任务区间重叠，不冒充宿主提供的执行耗时。
 
 Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action 实际 outcome 并等待已启动观察进程封存，之后上传固定 public 目录。它们不启动仓库脚本。审查和原始日志所在 private/Codex home 均不上传。独立汇总 job 从固定提交加载汇总入口，将报告只作为数据读取。
 
@@ -261,4 +261,4 @@ Codex 之后仅运行固定的基础设施动作：`github-script` 写入 Action
 
 修正后运行：https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42970143474 （提交 `2462b60`），核对中；运行最终结论见后续记录。
 
-本次本地 14 项能力验证测试、`actionlint -shellcheck=` 与 `git diff --check` 通过。按用户要求停止本地自动 code-review，本次不启动。
+本次本地 17 项能力验证测试、`actionlint -shellcheck=` 与 `git diff --check` 通过。按用户要求停止本地自动 code-review，本次不启动。

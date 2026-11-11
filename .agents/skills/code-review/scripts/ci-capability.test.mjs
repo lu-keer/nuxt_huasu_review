@@ -237,3 +237,17 @@ test('response outputs require matched host calls and fork metadata cannot overw
   assert.ok(events.every(e => e.thread === 'child'))
   assert.equal(events.find(e => e.type === 'host_status').agents[0].valid, true)
 })
+
+test('partial typed spawn and V2 metadata merge by runtime identity', t => {
+  const { dir, events } = evidence(t)
+  const source = events.filter(e => e.type !== 'collab_waiting_end')
+  for (let i = 0; i < RULES.length; i++) {
+    const args = source.find(e => e.type === 'spawn_arguments' && e.call_id === `call-${i}`)
+    args.thread = 'parent'
+    args.task = RULES[i]
+    source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
+  }
+  source.push({ type: 'host_status', agents: RULES.map(rule => ({ path: `/root/${rule}`, status: 'completed', valid: true })) })
+  save(join(dir, 'events.json'), source)
+  assert.equal(assess(dir).checks.delegation, 'PASS')
+})
