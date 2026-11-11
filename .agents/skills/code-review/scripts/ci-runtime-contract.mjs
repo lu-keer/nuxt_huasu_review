@@ -24,7 +24,9 @@ export function queryRuntimeContract(root, launch = spawn) {
     }
     const timer = setTimeout(finish, 30000)
     try {
-      child = launch('npx', ['--yes', `@openai/codex@${CLI_VERSION}`, 'app-server', '--stdio', '--strict-config'], {
+      // app-server needs a default when the Action's named permission profiles exist.
+      // This read-only, model-free query does not change the Action's selected profile.
+      child = launch('npx', ['--yes', `@openai/codex@${CLI_VERSION}`, 'app-server', '--stdio', '--strict-config', '-c', 'default_permissions=":read-only"'], {
         cwd: join(root, 'controller'), env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT,
           HOME: join(root, 'codex-home'), CODEX_HOME: join(root, 'codex-home') }, stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -40,6 +42,7 @@ export function queryRuntimeContract(root, launch = spawn) {
           const line = buffer.slice(0, end); buffer = buffer.slice(end + 1)
           let message
           try { message = JSON.parse(line) } catch { continue }
+          if (message.error?.data?.reason === 'configLoad') { result.reasons = ['CONFIGURATION_REJECTED']; finish(); return }
           if (message.id === 1 && message.result) {
             version = message.result.userAgent
             child.stdin.write(JSON.stringify({ method: 'initialized', params: {} }) + '\n')

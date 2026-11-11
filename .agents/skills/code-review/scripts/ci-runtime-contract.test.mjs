@@ -21,6 +21,7 @@ for (const [capacity, status] of [[2, 'PASS'], [3, 'UNVERIFIED'], [null, 'UNVERI
   const result = await queryRuntimeContract(root, (binary, args, options) => {
     assert.equal(binary, 'npx')
     assert.ok(args.includes('@openai/codex@0.167.1'))
+    assert.ok(args.includes('default_permissions=":read-only"'))
     assert.equal(options.env.OPENAI_API_KEY, undefined)
     const child = new EventEmitter(); child.stdout = new PassThrough(); child.kill = () => {}
     child.stdin = new Writable({ write(chunk, encoding, next) {

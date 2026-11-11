@@ -42,6 +42,14 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 
 本地验证与实际云端结果见后续“严格调度修正验收记录”；本地测试不代表云端通过。
 
+### 严格调度修正验收记录（2026-11-11）
+
+- 本地四组针对性测试（ci-runtime-contract、ci-scheduling、ci-review、ci-capability）54 项通过；`actionlint -shellcheck=` 与 `git diff --check` 通过。真实固定 CLI 的无模型 config/read 也确认有效 worker 容量为 2；未恢复本地自动审查。
+- 首轮固定提交 `86e8fbc`：[43002409934](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43002409934)。工作流执行成功不等于能力通过：严格调度 FAIL、控制演练 FAIL，完整演练 skipped。已下载并核对 capability-report 和 capability-probe，未合入默认分支。
+- 该轮 config/read 确认两个名额，六路 spawn 的实际请求/返回间隔为 23–29ms，宿主原生提交非阻塞；六路实际最大并发数为 2。例如 Standards 的父会话完成事件在 10:18:56.706 UTC、记录顺序 46，父会话随后在 10:18:58.404 UTC、顺序 47 调用 list_agents，而不是提交 pending devops。相同机制还发生于 devops 完成后。该轮可明确归因为父会话收到终态后未立即补位，不把这些结果追溯当作 PR #9 默认容量或根因的证据，也不把请求/返回间隔冒充 worker 执行时长。
+- 控制演练暴露两个独立问题：fixture AGENTS 自动发现干扰部分控制任务输出；部分保持任务在 helper 未退出时提前最终答复。修正为与正式流程一致的仓库外 controller 和 project_doc_max_bytes=0，控制消息显式说明不可信数据边界、等待真实退出码；未放宽 NO_FINDINGS、30 秒单任务或 5 分钟整组约束。判定器同时限定控制组自身的提交区间，避免把前一组的等待误计为本组违规。
+- 新版固定提交 `decfd9e`：[43004106125](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43004106125)：probe 六路严格调度及快速/保持控制组均 PASS，最大实际并发分别为 1/2。prepared 在模型启动前因命名权限配置缺少默认选择而预检失败，未执行完整演练。已为无模型 config/read 查询显式选择只读默认权限，未改变 Action 权限配置；等待新版云端复验。通过前不得合入；新 base PR 验收尚未执行。
+
 - 全部必要任务、核查与报告完成时 review 成功，包括有 findings。
 - 零可审查文本时不调用 Codex，正常完成。
 - 任一路失败、超时、缺失、输出无效、材料读取失败或证据不足时 review 失败，保留已核实 findings，不显示“未发现问题”。失败不自动重试、不换模型、不降级。
