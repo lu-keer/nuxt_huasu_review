@@ -251,3 +251,17 @@ test('partial typed spawn and V2 metadata merge by runtime identity', t => {
   save(join(dir, 'events.json'), source)
   assert.equal(assess(dir).checks.delegation, 'PASS')
 })
+
+test('durable child completion proves a terminal output after list_agents retires old entries', t => {
+  const { dir, events } = evidence(t)
+  const source = events.filter(e => e.type !== 'collab_waiting_end')
+  for (const event of source) if (event.type === 'worker_turn_completed') event.valid = true
+  save(join(dir, 'events.json'), source)
+  assert.equal(assess(dir).checks.delegation, 'PASS')
+  source.find(e => e.type === 'worker_turn_completed').valid = false
+  save(join(dir, 'events.json'), source)
+  assert.equal(assess(dir).checks.delegation, 'UNVERIFIED')
+  const projected = projectRecord({ type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'NO_FINDINGS' } }, 'child', dir)
+  assert.equal(projected.valid, true)
+  assert.doesNotMatch(JSON.stringify(projected), /NO_FINDINGS/)
+})

@@ -214,13 +214,14 @@ export function projectRecord(record, thread, root, calls = new Map()) {
       const args = JSON.parse(p.arguments)
       return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model'),
         task: /^[a-z0-9_]+$/i.test(args.task_name ?? '') ? args.task_name : undefined,
-        control: args.message?.includes('CONTROL_CANCEL') === true }
+        control: args.message?.includes('CONTROL_CANCEL') === true || args.task_name === 'control_cancel' }
     } catch { return null }
   }
   if (record.type !== 'event_msg') return null
   if (p.type === 'sub_agent_activity') return { ...base, type: 'agent_activity', id: p.agent_thread_id, path: p.agent_path, kind: p.kind, model: p.model, call_id: p.event_id }
   if (['task_started', 'turn_started', 'task_complete', 'turn_complete'].includes(p.type)) {
-    return { ...base, type: p.type.endsWith('started') ? 'worker_turn_started' : 'worker_turn_completed' }
+    return { ...base, type: p.type.endsWith('started') ? 'worker_turn_started' : 'worker_turn_completed',
+      ...(p.type.endsWith('started') ? {} : { valid: validOutput({ completed: p.last_agent_message }) }) }
   }
   if (/^collab_(agent_spawn|waiting|close|agent_interaction)_(begin|end)$/.test(p.type)) {
     const out = { ...base, type: p.type }
@@ -355,6 +356,7 @@ export function assess(directory) {
       ...(e.statuses?.[spawn.new_thread_id] ? [{ status: e.statuses[spawn.new_thread_id], timestamp: e.timestamp, valid: e.valid_outputs?.[spawn.new_thread_id] === true }] : []),
       ...(e.receiver_thread_id === spawn.new_thread_id && e.status ? [{ status: e.status, timestamp: e.timestamp }] : []),
       ...(e.type === 'host_status' ? (e.agents ?? []).filter(a => a.path === spawn.path).map(a => ({ ...a, timestamp: e.timestamp })) : []),
+      ...(e.type === 'worker_turn_completed' && e.thread === spawn.new_thread_id ? [{ status: 'completed', valid: e.valid === true, timestamp: e.timestamp }] : []),
     ]) : []
     const end = statuses.find(e => e.status === 'completed' && e.valid)
     const context = spawn ? events.filter(e => e.type === 'turn_context' && e.thread === spawn.new_thread_id) : []
