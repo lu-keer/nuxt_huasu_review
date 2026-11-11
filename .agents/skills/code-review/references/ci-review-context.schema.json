@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trusted prebuilt review context v1",
+  "type": "object",
+  "required": ["version", "repositoryRoot", "manifestPath", "base", "head", "trustedSkill", "outputDirectory", "materialOwner", "manifestHash", "patchHash"],
+  "properties": {
+    "version": { "const": 1 },
+    "repositoryRoot": { "type": "string", "minLength": 1 },
+    "manifestPath": { "type": "string", "minLength": 1 },
+    "trustedSkill": { "type": "string", "minLength": 1 },
+    "outputDirectory": { "type": "string", "minLength": 1 },
+    "materialOwner": { "const": "caller" },
+    "base": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "head": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "manifestHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "patchHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": true
+}

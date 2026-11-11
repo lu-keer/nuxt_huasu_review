@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "report", "tasks", "findings"],
+  "properties": {
+    "status": { "type": "string", "enum": ["complete", "incomplete"] },
+    "report": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["rule", "agent", "status"],
+        "properties": {
+          "rule": { "type": "string", "enum": ["standards", "architect", "devops", "product_contract", "runtime_performance", "security"] },
+          "agent": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["severity", "file", "line", "title", "evidence", "trigger", "impact"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["Critical", "Major", "Minor"] },
+          "file": { "type": "string" }, "line": { "type": "integer" },
+          "title": { "type": "string" }, "evidence": { "type": "string" },
+          "trigger": { "type": "string" }, "impact": { "type": "string" }
+        }
+      }
+    }
+  }
+}
