@@ -167,3 +167,35 @@ test('summary distinguishes native and adapted rehearsal; absent artifacts remai
   assert.equal(summarize(input, output).conclusion, '需最小适配后接入')
 })
 
+
+test('0.167.1 typed command and V2 status items retain evidence without arbitrary output', t => {
+  const root = temporary(t)
+  mkdirSync(join(root, 'public'))
+  save(join(root, 'public/config.json'), { base: 'fixture' })
+  const command = `node ${join(root, 'skill/scripts/ci-capability.mjs')} operation ${root} write-temp`
+  const projected = projectRecord({ type: 'event_msg', payload: { type: 'item_completed', item: {
+    type: 'CommandExecution', command: ['bash', '-lc', command], exit_code: 1,
+    aggregated_output: 'secret\nCAPABILITY_EVIDENCE {"operation":"write-temp","status":"FAIL","failure":"permission_denied","diagnostic":"filesystem_permission_denied"}\n',
+  } } }, 'parent', root)
+  assert.equal(projected.status, 'FAIL')
+  assert.equal(projected.diagnostic, 'filesystem_permission_denied')
+  assert.doesNotMatch(JSON.stringify(projected), /secret/)
+  const status = projectRecord({ type: 'event_msg', payload: { type: 'item_completed', item: {
+    type: 'FunctionCallOutput', name: 'list_agents', id: 'status', output: JSON.stringify({ agents: [
+      { agent_name: '/root/control_cancel', agent_status: 'interrupted' },
+      { agent_name: '/root/standards', agent_status: { completed: 'NO_FINDINGS' } },
+    ] }),
+  } } }, 'parent', root)
+  assert.deepEqual(status.agents.map(a => a.status), ['interrupted', 'completed'])
+  assert.equal(status.agents[1].valid, true)
+  assert.doesNotMatch(JSON.stringify(status), /NO_FINDINGS/)
+})
+
+test('typed exec output alone cannot authenticate a command', t => {
+  const root = temporary(t)
+  const record = { type: 'event_msg', payload: { type: 'item_completed', item: {
+    type: 'FunctionCallOutput', name: 'exec_command', id: 'cmd',
+    output: 'Process exited with code 0\nCAPABILITY_EVIDENCE {"operation":"read-skill","status":"PASS"}',
+  } } }
+  assert.equal(projectRecord(record, 'parent', root), null)
+})

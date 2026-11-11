@@ -131,7 +131,7 @@ jobs:
           working-directory: ${{ runner.temp }}/codex-skill-capability/fixture
           model: gpt-6.1-sol
           effort: low
-          sandbox: read-only
+          permission-profile: ${{ needs.assess-probe.outputs.rehearsal_mode == 'prepared' && 'capability-temp' || ':read-only' }}
           safety-strategy: drop-sudo
           prompt-file: ${{ runner.temp }}/codex-skill-capability/private/prompt.md
           output-schema-file: ${{ runner.temp }}/codex-skill-capability/skill/references/ci-capability-result.schema.json
