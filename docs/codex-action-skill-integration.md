@@ -176,3 +176,5 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 第一阶段仍保留现有通用 PR workflow。先合入可信入口，再在后续 PR 切换 execute/review/comment 三 job，避免 base 缺失入口时回退读取 head。若正式验收失败，保留原 workflow；上线故障回退 workflow 切换提交，不恢复本地自动审查，不启用多进程执行器。
 
 本地机械验证：`node --test .agents/skills/code-review/scripts/ci-review.test.mjs .agents/skills/code-review/scripts/ci-capability.test.mjs`，`actionlint -shellcheck=` 与 `git diff --check`。正式云端结果将在实际运行后补充，当前不标记完成。本次不启动本地自动 code-review。
+
+取消边界：除 `cancelled()` 外，review/comment 显式要求 `needs.execute.result != ''cancelled''`，避免 job 级取消被误作执行失败继续合成报告。取消保护验证使用运行 [42983040977](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/42983040977)，由后续文档提交触发新的 execute 并取消该旧执行；最终实际状态将记录在上线验收中。
