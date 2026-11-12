@@ -76,38 +76,46 @@ Check out the [deployment documentation](https://nuxt.com/docs/getting-started/d
 
 ## Codex PR 自动审查
 
-本项目通过 [Codex GitHub Action](https://learn.chatgpt.com/docs/github-action) 对 PR 进行静态审查，并创建或更新一条中文评论。此流程不安装项目依赖、不执行构建或测试、不修改代码、不自动合并，也不是强制合并门禁。
+正式工作流为 `.github/workflows/codex-review.yml`，包含 `execute`、`review`、`comment` 三个 job，负责真实静态审查、独立证据校验及中文评论发布。不安装项目依赖、不运行应用、构建或测试、不修改代码、不自动合并；工作流本身不配置强制合并门禁。无发现不代表代码没有缺陷。
 
-### 启用
+### 启用与触发
 
-1. 先将 `.github/workflows/codex-review.yml` 和 `.github/codex/prompts/review.md` 合并到目标分支。工作流只读取 PR **base SHA** 中的提示词；首次引入配置的 PR 可能因 base 中尚无提示词而失败，这是预期行为。
-2. 在仓库 **Settings → Secrets and variables → Actions** 新增 repository secret `OPENAI_API_KEY`，并确认对应 API 项目有可用额度。不要将密钥写入仓库。
-3. 确认仓库或组织允许使用 `actions/checkout`、`openai/codex-action` 和 `actions/github-script`，且允许工作流声明评论所需的 `issues: write`、`pull-requests: write` 权限。无需为所有工作流开启默认写权限。
-4. 创建同仓库、非草稿测试 PR，验证 Actions 运行和评论。之后推送新提交，确认更新原评论而非重复发布。
+1. 将正式工作流与 `.agents/skills/code-review/` 合并到目标分支。准备、校验和发布工具均取自 PR 的固定 base SHA；修改技能的 PR 仍使用 base 中的可信版本，新版本合并后用于后续 PR。
+2. 在仓库 Actions secrets 配置 `OPENAI_API_KEY`，确认所配置服务有可用额度，并允许工作流使用固定版本的 Actions 和显式权限。
+3. 同仓库、非草稿 PR 在创建、推送新提交、重新打开、转为待审查时运行。fork 和草稿 PR 跳过；触发者仍受 Codex Action 的权限限制。
 
-### 触发与结果
+当前配置固定 Codex CLI `0.167.1`、模型 `gpt-6.1-sol`、effort `low`，Responses endpoint 为 `https://gptapi001.huasu.org/v1/responses`。第三方 Actions 均固定到 commit SHA。调用会消耗 API 及 GitHub Actions 额度。
 
-- 在 PR 创建、推送新提交、重新打开或从草稿转为待审查时触发；fork PR、草稿 PR 跳过。Codex Action 保留默认触发者权限限制，仅允许具备仓库写权限的协作者，不额外放行机器人或其他用户。
-- 同一 PR 新运行取消旧运行。发布前重新检查 PR 是否打开、是否为草稿以及 head SHA 是否仍然匹配；已过期的报告不发布。
-- 审查 job 只有仓库读取权限，使用 `read-only` sandbox 和 `drop-sudo`；评论 job 不检出 PR 代码、不接收 OpenAI Key。
-- 评论带有被审查 commit 和 Actions 链接。最多输出 5 个问题；超过 12,000 字符的模型正文在发布时截断并标记。无发现不代表质量保证。
-- 修改提示词的 PR 使用旧的可信提示词审查；新规则合并后才用于后续以该提交为 base 的 PR。仓库内其他指令仅作为审查数据。
-- 失败时保留旧评论，其 commit 标识仍对应历史审查；请以最新 Actions 状态及评论中的 commit 判断结果。空报告会使评论 job 失败，不发布成功评论。
+### 正式审查与证据
 
-API 调用按 OpenAI API 使用计费，GitHub Actions 也可能消耗仓库运行额度。模型、effort 和 Codex CLI 版本使用 Action 默认值，费用和结果不保证固定；通过触发限制、并发取消及 15 分钟审查超时控制运行量。取消运行不撤销已经产生的费用。
+- 在干净的固定 head 上，通过 base 导出的原始 helper 预构建快照。审查排除 ignored 路径、`*.md`、`docs/**`、`.docs/**`、`*.test.mjs`；无可审查文本时不调用模型。
+- Standards 与 architect、devops、product_contract、runtime_performance、security 共六个独立 worker，各自读取同一 manifest 和全部完整 patch，继承模型及 effort，使用独立上下文。主会话核查候选、合并重复，不代审规则。
+- 可信配置要求六个 worker 名额（不含主会话），连续提交六路后等待，不要求六路同时运行。独立校验器核对真实容量、请求与返回、身份、材料摘要、模型配置及终态；任一必要任务或证据不完整，不能认定审查完成。
+- 单任务预算为 10 分钟，整场预算为 30 分钟，最多再留 30 秒收尾。Codex Action 步骤超时 33 分钟，execute job 超时 40 分钟，review 与 comment job 各 5 分钟。
+- execute 仅有仓库读取权限，使用 `review-temp` 权限配置和 `drop-sudo`：审查工作区只读，指定 runtime-tmp 可写。运行时能力查询保留为正式准备步骤，不执行模拟能力演练。review 有仓库与 Actions 读取权限；comment 有仓库读取及评论写入权限，不接收 OpenAI Key。
+- 原始事件经白名单投影与脱敏，执行证据和机器结果分别上传为 `codex-review-evidence-<run>-<attempt>`、`codex-review-result-<run>-<attempt>`，保留 7 天。未公开任意 rollout 日志、提示词或环境内容。
 
-当前使用 `actions/checkout@v5`、`openai/codex-action@v1`、`actions/github-script@v7`，未固定 commit SHA。最终报告保存到审查 runner 的临时目录并通过 job output 传递，不上传 artifact，也不长期保存临时文件。
+### 评论与并发
+
+同一 PR 新的 execute 运行会取消旧 execute；评论发布串行执行。发布前核对结果身份，并重新检查 PR 仍打开、非草稿且 head 未变化，避免发布过期报告或覆盖更新结果。
+
+评论展示 Standards、五条 AI 规则、核实问题及摘要，并标明 base/head、run/attempt 和 Actions 链接。不设置“最多五个问题”的限制。超过评论预算时展示问题索引，完整详情分段写入 review job 的在线 Summary；详细内容无法交付时明确报错。失败或证据不足时按可用证据报告未完成，不作为“未发现问题”。
+
+模拟评论展示验收、独立能力探测演练及旧分批工具已移除，不再作为日常或手动工作流。正式链路的单元测试保留，可本地执行：
+
+```powershell
+$reviewTests = Get-ChildItem .agents/skills/code-review/scripts/*.test.mjs | ForEach-Object FullName
+node --test $reviewTests
+```
 
 ### 排错与验收
 
 | 现象 | 排查方式 |
 | --- | --- |
-| 提示可信提示词缺失或为空 | 确认 PR base commit 包含非空 `.github/codex/prompts/review.md`；不回退使用 PR 内的版本 |
-| 缺少 Key、API 认证失败或额度不足 | 检查 repository secret 名称、Key 有效性与 API 额度；不要在日志中输出 Key |
-| 触发者被拒绝 | 检查其仓库写权限；默认不允许机器人，勿为消除错误直接放行所有用户 |
-| 没有运行或显示 skipped | 确认事件类型、同仓库 PR、非草稿状态，以及仓库 Actions 策略 |
-| 评论返回 403 | 检查组织策略是否允许 job 声明的评论写权限 |
-| 没有新评论但审查成功 | 检查评论 job；PR 关闭、转草稿或 head 改变时会跳过发布 |
-| 空报告、API 错误或超时 | 查看失败 job；不将失败视为审查通过，已有评论不会被清空 |
+| 可信准备失败 | 确认固定 base 包含完整技能及 helper，固定 head 干净，快照材料校验通过 |
+| Key 缺失或 API 错误 | 检查 secret 名称、服务认证与额度，不输出密钥 |
+| 检查 skipped | 确认是否同仓库、非草稿，以及事件与触发者权限是否满足条件 |
+| 审查未完成 | 查看 evidence/result artifact 的 reasons、worker 终态、读取摘要与调度诊断，不以模型自述替代证据 |
+| 评论失败或未更新 | 检查 comment job 权限、结果身份、PR 当前 head 与在线详情交付状态 |
 
-上线时需用真实 PR 验证首次评论、后续更新、并发取消、草稿跳过、fork 跳过、权限拒绝、可信提示词读取和过期结果拦截。另需验证无发现、超长输出、空输出、Key 缺失/API 失败及评论权限不足场景。修改合并前的本地静态检查不代表这些远端场景已经通过。
+本地测试不能替代真实远端验收。工作流变更后，用真实 PR 验证执行、证据校验与评论更新；跳过、取消、权限失败及过期拦截等场景，只有实际验证后才能记录通过。

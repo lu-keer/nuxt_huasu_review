@@ -80,11 +80,9 @@ test('runtime instructions do not require Python', () => {
   assert.doesNotMatch(runtimeText, /\.py\b/i)
 })
 
-// Validate real discoverability rather than locking active batches to all rules.
-test('batch helpers and applicability catalog are packaged with the skill', () => {
-  for (const file of ['build-review-batches.mjs', 'rule-catalog.mjs']) {
-    assert.ok(existsSync(join(scriptsDirectory, file)))
-  }
+// Validate the rule catalog used by the full-snapshot review.
+test('applicability catalog is packaged with the skill', () => {
+  assert.ok(existsSync(join(scriptsDirectory, 'rule-catalog.mjs')))
   const catalog = discoverRuleCatalog(skillDirectory)
   assert.deepEqual(catalog.map(rule => rule.path.split('/').at(-1)), expectedRules)
   assert.deepEqual(catalog.filter(rule => rule.required).map(rule => rule.path), [])

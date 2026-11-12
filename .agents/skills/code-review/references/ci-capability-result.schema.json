@@ -1,9 +1,0 @@
-{
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["report", "delivery_payload"],
-  "properties": {
-    "report": { "type": "string" },
-    "delivery_payload": { "type": "string" }
-  }
-}

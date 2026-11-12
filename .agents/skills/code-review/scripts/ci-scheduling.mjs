@@ -92,26 +92,3 @@ export function assessScheduling(events, config, contract, rules = RULE_IDS) {
     maximumActualConcurrency: entries.length === rules.length && !reasons.includes('WORKER_INTERVAL_UNVERIFIED') && !reasons.includes('EVENT_TIME_UNVERIFIED') ? maximum : null,
     configuration: { policy: configured ? 'PASS' : 'UNVERIFIED', capacity: capacityVerified ? 'PASS' : 'UNVERIFIED' } }
 }
-
-export function assessControls(events, config, contract) {
-  const fastRules = Array.from({ length: 6 }, (_, i) => `control_fast_${i}`)
-  const holdRules = Array.from({ length: 6 }, (_, i) => `control_hold_${i}`)
-  const fast = assessScheduling(events, config, contract, fastRules)
-  const held = assessScheduling(events, config, contract, holdRules)
-  const allRules = [...fastRules, ...holdRules]
-  const identities = events.filter(e => e.type === 'session_meta' && allRules.some(rule => e.path === `/root/${rule}`))
-  const starts = events.filter(e => e.type === 'worker_turn_started' && identities.some(id => id.thread === e.thread))
-  const ends = events.filter(e => e.type === 'worker_turn_completed' && identities.some(id => id.thread === e.thread))
-  const times = [...starts, ...ends].map(time)
-  const bounded = starts.length === 12 && ends.length === 12 && times.every(Number.isFinite) && Math.max(...times) - Math.min(...times) <= 300000 &&
-    identities.every(id => {
-      const a = starts.find(e => e.thread === id.thread), b = ends.find(e => e.thread === id.thread)
-      return a && b && time(b) >= time(a) && time(b) - time(a) <= 30000
-    })
-  const heldOperations = holdRules.every(rule => identities.some(id => id.path === `/root/${rule}` && events.some(e =>
-    e.type === 'control_hold' && e.thread === id.thread && e.exitCode === 0)))
-  const concurrency = held.maximumActualConcurrency >= 2 && heldOperations
-  return { status: fast.status === 'FAIL' || held.status === 'FAIL' ? 'FAIL' :
-    fast.status === 'PASS' && held.status === 'PASS' && bounded && concurrency ? 'PASS' : 'UNVERIFIED',
-    fast, held, bounded, concurrency }
-}
