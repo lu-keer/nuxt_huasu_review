@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { prepareReview, validateManifest, validateResult, assessReview, commentBody, newerComment, publish } from './ci-review.mjs'
+import { prepareReview, validateManifest, validateResult, assessReview, publish } from './ci-review.mjs'
 import { CLI_VERSION, RULES, digest, save, canonical } from './ci-runtime.mjs'
 
 function temp(t) {
@@ -161,6 +161,8 @@ test('real-file native evidence passes; valid findings do not block review', t =
   const a = assessReview(f.root, f.output, { head: f.config.head, run: '10', attempt: '1' })
   assert.equal(a.status, 'complete')
   assert.equal(a.counts.Major, 1)
+  assert.equal(existsSync(join(f.output, 'report.md')), false)
+  assert.equal(JSON.parse(readFileSync(join(f.output, 'result.json'))).findings[0].sources[0], 'standards')
 })
 
 test('missing terminal, wrong material, model override, stale identity and failed calls never pass', t => {
@@ -211,5 +213,8 @@ test('publisher rechecks head after pagination and never overwrites a newer same
   assert.equal(writes, 0)
   github.paginate = async () => [{ id: 1, user: { login: 'github-actions[bot]', type: 'Bot' }, body: `<!-- codex-pr-review -->\n<!-- codex-run ${result.head} 10 2 -->` }]
   assert.equal(await publish(github, context, result, 'report'), 'newer-result')
+  assert.equal(writes, 0)
+  github.paginate = async () => [{ id: 1, user: { login: 'github-actions[bot]', type: 'Bot' }, body: `<!-- codex-pr-review -->\n<!-- codex-run ${result.head} 11 1 -->` }]
+  assert.equal(await publish(github, context, result), 'newer-result')
   assert.equal(writes, 0)
 })

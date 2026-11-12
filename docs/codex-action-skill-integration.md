@@ -222,4 +222,4 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 
 评论完整时仅生成机器结果，不生成重复 report.md，也不提供下载式报告入口。超长详情写入 review job 的 Job Summary，每步最多 900,000 字节、最多 20 步；通过当前 run/attempt 的 Actions API 查询真实 review job ID，生成运行总览的 `#summary-{jobId}` 直达链接。写入或定位失败时发布明确交付失败提示，检查失败，仍保留有效问题和机器结果。摘要继承 Actions 权限和运行保留周期，不是永久文档。
 
-机器结果与白名单原始证据分别通过 artifact 跨 job 传递，保留 7 天；artifact 不作为在线文档入口。隐藏标记、固定 head/run/attempt 校验及过期发布保护不变。详见 [评论规范](ci-review-comment-spec.md)。默认分支是否已上线及真实验证见后续验收记录。
+机器结果与白名单原始证据分别通过 artifact 跨 job 传递，保留 7 天；artifact 不作为在线文档入口。隐藏标记、固定 head/run/attempt 校验及过期发布保护不变。详见 [评论规范](ci-review-comment-spec.md)。实现分支真实六路与受控展示验收已通过，未合入默认分支；详见 [评论模板验收记录](ci-review-comment-validation.md)。
