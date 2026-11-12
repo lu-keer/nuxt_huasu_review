@@ -32,7 +32,7 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 
 正式审查与能力验证共用 `ci-scheduling.mjs`，不再以任意两路区间重叠作为通过依据。可信 context/config 固定 `schedulingPolicy=required`；缺失、降级或调度结果为 FAIL/UNVERIFIED 时，review 未完成且失败，仍保留已核实 findings。零可审查文本不启动模型，调度为 NOT_APPLICABLE。
 
-可信准备显式配置 `agents.max_concurrent_threads_per_session=2`（不含主会话），并在模型调用前由固定 CLI `0.167.1` 的 app-server `config/read` 查询有效容量及子任务默认配置。该查询不创建模型 turn，不携带 API key；只保存白名单容量、版本与配置摘要。接口或有效配置未验证时准备失败，不调用模型。配置语义来源：[官方 multi-agent 文档](https://developers.openai.com/codex/multi-agent/)，固定 CLI 另用 strict-config 与真实 config/read 验证，不以最新版文档代替版本验证。
+可信准备显式配置 `agents.max_concurrent_threads_per_session=6`（不含主会话），并在模型调用前由固定 CLI `0.167.1` 的 app-server `config/read` 查询有效容量及子任务默认配置。该查询不创建模型 turn，不携带 API key；只保存白名单容量、版本与配置摘要。接口或有效配置未验证时准备失败，不调用模型。配置语义来源：[官方 multi-agent 文档](https://developers.openai.com/codex/multi-agent/)，固定 CLI 另用 strict-config 与真实 config/read 验证，不以最新版文档代替版本验证。
 
 观察器保存同一父会话的 spawn 请求/返回、任务身份、原始时间/记录顺序、等待/状态查询、fork_turns 与 model/effort 覆盖标记、子会话实际配置。继续过滤继承历史、认证、prompt 和任意输出。校验器核查六路完整身份链，有名额且提交已返回时必须继续提交，满额才等待；快速自然完成和阻塞 spawn 不直接判违规。容量、返回、顺序或实际配置不完整时 UNVERIFIED，不估算宿主耗时。
 
@@ -42,7 +42,9 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 
 本地验证与实际云端结果见后续“严格调度修正验收记录”；本地测试不代表云端通过。
 
-### 严格调度修正验收记录（2026-11-12）
+最新真实 PR 三路径验收及运行证据见 [严格调度验收记录](ci-strict-scheduling-validation.md)；历史两名额失败记录不作为现行六名额配置结论。
+
+### 严格调度修正前置验收记录（2026-11-12）
 
 - 本地四组针对性测试（ci-runtime-contract、ci-scheduling、ci-review、ci-capability）54 项通过；`actionlint -shellcheck=` 与 `git diff --check` 通过。真实固定 CLI 的无模型 config/read 也确认有效 worker 容量为 2；未恢复本地自动审查。
 - 首轮固定提交 `86e8fbc`：[43002409934](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43002409934)。工作流执行成功不等于能力通过：严格调度 FAIL、控制演练 FAIL，完整演练 skipped。已下载并核对 capability-report 和 capability-probe，未合入默认分支。
