@@ -38,6 +38,8 @@ test('findings render once, reference all sources, escape content, bind verified
   assert.ok(body.includes(`/blob/${r.head}/%E7%A9%BA%20%E6%A0%BC/%5Bx%5D.vue#L5`))
   r.findings[0].side = 'base'
   assert.ok(renderReview(r, repo).includes(`/blob/${r.base}/`))
+  r.linkBase = 'c'.repeat(40)
+  assert.ok(renderReview(r, repo).includes(`/blob/${r.linkBase}/`))
   r.findings[0].line = 99
   assert.match(renderReview(r, repo), /位置未验证/)
 })
@@ -78,6 +80,17 @@ test('old schema, invalid source and invalid statistics do not silently pass', (
   value.version = 1; assert.throws(() => validateResult(value, {}), /version/)
   value.version = 2; value.statistics.merged = -1; assert.throws(() => validateResult(value, {}), /statistics/)
   value.statistics.merged = 0; value.findings[0].sources = ['invented']; assert.throws(() => validateResult(value, { reviewFiles: [value.findings[0].file] }), /finding/)
+})
+test('large finding index is reduced without dropping status or counts', () => {
+  const r = fixture()
+  r.findings = Array.from({ length: 500 }, (_, i) => ({ ...finding(['security']), title: '长标题'.repeat(30) + i }))
+  r.counts.Major = 500
+  const comment = makeComment(r, repo, run, run + '#summary-123')
+  assert.ok(Array.from(comment.body).length <= 50000)
+  assert.match(comment.body, /核实 500 项/)
+  assert.match(comment.body, /未展示 [1-9]\d*/)
+  assert.match(comment.body, /Major 500/)
+  assert.equal((comment.summary.match(/触发条件：/g) ?? []).length, 500)
 })
 test('delivery uses API job URL and persists failure without fake document link', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'comment-delivery-'))

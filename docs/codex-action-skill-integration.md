@@ -58,7 +58,7 @@ CI context/result schema、可信提示词及全部适配模块均位于 skill �
 - 零可审查文本时不调用 Codex，正常完成。
 - 任一路失败、超时、缺失、输出无效、材料读取失败或证据不足时 review 失败，保留已核实 findings，不显示“未发现问题”。失败不自动重试、不换模型、不降级。
 - 人工取消或强制超时以 GitHub 实际状态为准，不能保证 artifact，不能合成完成报告。
-- 完整报告始终在 artifact；不经 job output 传递大文本。评论正文连包装不超过 50,000 字符时完整发布，否则仅状态、严重程度摘要和 artifact 链接，完整 findings 不截断。
+- 当前实现分支：机器结果与原始证据保存在 artifact，不经 job output 传递大文本；评论连包装不超过 50,000 字符时完整发布，不另出报告。超长详情使用 Job Summary，旧版下载式报告仅作为历史行为保留在验收记录。
 - 报告包含 Standards、AI Review Rules、Summary、固定 head/base、模型/CLI 和证据位置。
 - execute 按 PR 取消旧执行；comment 独立按 PR 串行，不主动取消发布者。
 
@@ -220,6 +220,6 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 
 正文固定为 Standards、AI Review Rules、Summary，五条规则表格展示。问题来源与剔除/合并统计通过 version 2 schema 传递；未知统计为 null。独立校验状态优先于模型自述。
 
-评论完整时仅生成机器结果，不生成重复 report.md，也不提供下载式报告入口。超长详情写入 review job 的 Job Summary，每步最多 900,000 字节、最多 20 步；通过当前 run/attempt 的 Actions API 查询真实 job URL。写入或定位失败时发布明确交付失败提示，检查失败，仍保留有效问题和机器结果。摘要继承 Actions 权限和运行保留周期，不是永久文档。
+评论完整时仅生成机器结果，不生成重复 report.md，也不提供下载式报告入口。超长详情写入 review job 的 Job Summary，每步最多 900,000 字节、最多 20 步；通过当前 run/attempt 的 Actions API 查询真实 review job ID，生成运行总览的 `#summary-{jobId}` 直达链接。写入或定位失败时发布明确交付失败提示，检查失败，仍保留有效问题和机器结果。摘要继承 Actions 权限和运行保留周期，不是永久文档。
 
 机器结果与白名单原始证据分别通过 artifact 跨 job 传递，保留 7 天；artifact 不作为在线文档入口。隐藏标记、固定 head/run/attempt 校验及过期发布保护不变。详见 [评论规范](ci-review-comment-spec.md)。默认分支是否已上线及真实验证见后续验收记录。

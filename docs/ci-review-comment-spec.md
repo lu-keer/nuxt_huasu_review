@@ -60,7 +60,7 @@ PR #17 的 [github-actions 审查评论](https://github.com/lu-keer/nuxt_huasu_r
 
 只有评论超长或确有补充详情时才生成独立文档，入口名称为“查看详细审查文档”，必须能在浏览器直接阅读。Actions artifact 下载页不属于在线文档，不再使用“完整报告与证据”作为下载入口名称。
 
-默认底部仅展示“查看 Actions”。补充文档不得提交到被审 PR 以改变审查 head，也不能未经决定直接提交到默认分支。在线详情使用 review job 的 Actions Job Summary，继承 Actions 的访问权限与运行保留周期；不新增仓库内容写权限，不保证永久地址。通过 GitHub API 查询当前 run/attempt 的真实 review job URL。按完整段落拆分，每步不超过 900,000 字节，最多 20 步；单段或总量超限即明确交付失败，不使用下载链接替代。
+默认底部仅展示“查看 Actions”。补充文档不得提交到被审 PR 以改变审查 head，也不能未经决定直接提交到默认分支。在线详情使用 review job 的 Actions Job Summary，继承 Actions 的访问权限与运行保留周期；不新增仓库内容写权限，不保证永久地址。通过 GitHub API 查询当前 run/attempt 的真实 review job ID，使用运行总览的 `#summary-{jobId}` 锚点直达正文（job URL 默认打开日志）。按完整段落拆分，每步不超过 900,000 字节，最多 20 步；单段或总量超限即明确交付失败，不使用下载链接替代。
 
 原始白名单执行证据继续由 Actions artifact 保存，保留现有敏感信息过滤边界。正文不输出无用的 runner 绝对路径；准确材料位置、任务身份和读取证据留在诊断数据中。材料由 CI 调用方持有，不将 runner 回收描述为已执行显式清理。
 

@@ -63,9 +63,9 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   const config = {
     version: 1, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', workerCapacity: WORKER_CAPACITY, entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
     repositoryRoot: repo, root, manifestPath, reviewFiles: manifest.textFiles, textFileCount: manifest.textFileCount,
-    locations: Object.fromEntries(manifest.textFiles.map(file => [file, Object.fromEntries([['head', head], ['base', base]].map(([side, commit]) => {
+    locations: Object.fromEntries(manifest.textFiles.map(file => [file, Object.fromEntries([['head', head], ['base', git(repo, ['merge-base', base, head])]].map(([side, commit]) => {
       const shown = spawnSync('git', ['show', `${commit}:${file}`], { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-      return [side, shown.status === 0 ? (shown.stdout.match(/\n/g)?.length ?? 0) + (shown.stdout && !shown.stdout.endsWith('\n') ? 1 : 0) : null]
+      return [side, shown.status === 0 ? (shown.stdout.match(/\n/g)?.length ?? 0) + (shown.stdout.length > 0 && !shown.stdout.endsWith('\n') ? 1 : 0) : null]
     }))])),
     cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: 'temp-write-only',
     manifestHash: digest(readFileSync(manifestPath)), patchHash: digest(Buffer.concat(manifest.layers.map(l => readFileSync(l.patchPath)))),
@@ -200,7 +200,7 @@ export function assessReview(input, output, expected = {}) {
   const metadata = { version: RESULT_VERSION, status: complete ? 'complete' : 'incomplete', base: expected.base ?? config?.base, head: expected.head ?? config?.head,
     run: expected.run ?? config?.run, attempt: expected.attempt ?? config?.attempt, counts, reasons, workers, outcome, scheduling, configuration: scheduling.configuration ?? null,
     findings, statistics: final?.statistics ?? { discarded: null, merged: null }, textFileCount: config?.textFileCount ?? null,
-    manifestHash: config?.manifestHash, locations: config?.locations ?? {}, cli: CLI_VERSION, model: config?.model ?? null, effort: config?.effort ?? null }
+    manifestHash: config?.manifestHash, linkBase: config?.mergeBase, locations: config?.locations ?? {}, cli: CLI_VERSION, model: config?.model ?? null, effort: config?.effort ?? null }
   save(join(output, 'result.json'), metadata)
   return metadata
 }

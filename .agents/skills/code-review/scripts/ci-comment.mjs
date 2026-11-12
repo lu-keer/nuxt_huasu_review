@@ -11,7 +11,7 @@ const sorted = result => [...(result.findings ?? [])].sort((a, b) => ['Critical'
 function location(f, result, repoUrl) {
   const label = escapeText(`${f.file}:${f.line}`)
   const count = result.locations?.[f.file]?.[f.side]
-  const commit = f.side === 'base' ? result.base : result.head
+  const commit = f.side === 'base' ? (result.linkBase ?? result.base) : result.head
   return Number.isSafeInteger(count) && f.line <= count && /^[a-f0-9]{40}$/.test(commit ?? '')
     ? `[${label}](${repoUrl}/blob/${commit}/${f.file.split('/').map(encodeURIComponent).join('/')}#L${f.line})`
     : `${label}（位置未验证）`
@@ -21,7 +21,10 @@ export function renderReview(result, repoUrl, compact = false, indexCount = Infi
   const worker = rule => result.workers?.find(w => w.rule === rule)
   const covered = rule => worker(rule)?.reads?.some(r => r.manifestHash === result.manifestHash && r.status === 'PASS')
   const state = rule => empty ? '未运行' : statusText(worker(rule)?.status ?? 'unknown')
-  const ids = rule => findings.filter(f => f.sources.includes(rule)).map(f => f.id).join('、')
+  const ids = rule => {
+    const matches = findings.filter(f => f.sources.includes(rule))
+    return compact && matches.length ? `核实 ${matches.length} 项（见问题索引及在线详情）` : matches.map(f => f.id).join('、')
+  }
   const outcome = rule => empty ? '无可审查文本' : ids(rule) || (worker(rule)?.status === 'completed' && covered(rule) ? '未发现问题' : '未取得完整核实结果')
   const detail = f => `- **${f.id} · ${f.severity}：${escapeText(f.title)}** — ${location(f, result, repoUrl)}\n\n  触发条件：${escapeText(f.trigger)}\n  代码依据：${escapeText(f.evidence)}\n  影响：${escapeText(f.impact)}`
   const scope = rule => covered(rule) ? `覆盖全部 ${result.textFileCount} 个可审查文本文件` : '完整覆盖未确认'
@@ -47,9 +50,16 @@ export function makeComment(result, repoUrl, runUrl, documentUrl = null) {
   const summary = renderReview(result, repoUrl)
   let count = sorted(result).length
   const ending = documentUrl ? `\n\n详细证据见[查看详细审查文档](${documentUrl})。` : '\n\n详细审查文档交付失败：没有可验证的在线入口；请查看 Actions 诊断。'
-  let body
-  do { body = stamp + renderReview(result, repoUrl, true, count) + ending + footer; if (length(body) <= COMMENT_LIMIT) break; count-- } while (count >= 0)
-  if (count < 0) throw new Error('comment metadata exceeds budget')
+  const compactBody = n => stamp + renderReview(result, repoUrl, true, n) + ending + footer
+  if (length(compactBody(0)) > COMMENT_LIMIT) throw new Error('comment metadata exceeds budget')
+  let low = 0, high = count
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (length(compactBody(middle)) <= COMMENT_LIMIT) low = middle
+    else high = middle - 1
+  }
+  count = low
+  const body = compactBody(count)
   return { body, summary }
 }
 export function splitSummary(markdown) {
