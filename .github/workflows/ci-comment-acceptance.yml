@@ -1,0 +1,36 @@
+name: Controlled comment presentation acceptance
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions: {}
+jobs:
+  review:
+    if: github.event.pull_request.base.ref == 'feat/ci-review-comment-template' && github.event.pull_request.head.ref == 'feat/ci-comment-acceptance' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Exercise controlled templates and online summary
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const path = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const script = path.join(process.env.GITHUB_WORKSPACE, '.agents/skills/code-review/scripts/ci-comment-acceptance.mjs');
+            const { runAcceptance } = await import(pathToFileURL(script).href);
+            core.info(JSON.stringify(await runAcceptance(github, context, path.join(process.env.RUNNER_TEMP, 'presentation-acceptance'), process.env.GITHUB_STEP_SUMMARY)));
+      - name: Preserve controlled acceptance results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: controlled-comment-acceptance
+          path: ${{ runner.temp }}/presentation-acceptance/
+          retention-days: 7
