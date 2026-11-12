@@ -91,8 +91,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    outputs:
-      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+      actions: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -107,14 +106,119 @@ jobs:
         with:
           name: codex-review-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/review-input
-      - name: Validate runtime evidence and full report
+      - name: Validate runtime evidence and machine result
         run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-review.mjs" assess "$RUNNER_TEMP/review-input" "$RUNNER_TEMP/review-report"
-      - name: Upload full report including failure diagnostics
+      - name: Prepare optional online summary
+        id: delivery
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const tool = path.join(process.env.RUNNER_TEMP, 'trusted-review/.agents/skills/code-review/scripts/ci-review.mjs');
+            const { assessReview, prepareDelivery } = await import(pathToFileURL(tool).href);
+            const dir = path.join(process.env.RUNNER_TEMP, 'review-report');
+            if (!fs.existsSync(path.join(dir, 'result.json'))) assessReview(path.join(process.env.RUNNER_TEMP, 'missing-evidence'), dir, {
+              base: process.env.REVIEW_BASE_SHA, head: process.env.REVIEW_HEAD_SHA, run: String(context.runId), attempt: process.env.GITHUB_RUN_ATTEMPT,
+            });
+            const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+            // An upgrade PR still runs the trusted tools exported from its old base.
+            // Keep that base's result and publisher contract; never load head tools here.
+            if (typeof prepareDelivery !== 'function') {
+              if (result.version !== undefined) { core.setFailed('Unsupported trusted delivery contract'); return; }
+              fs.writeFileSync(path.join(dir, 'delivery.json'), JSON.stringify({
+                mode: 'legacy', required: false, parts: 0, url: null, error: null,
+              }));
+              core.setOutput('parts', 0);
+              core.info('Trusted base uses the legacy report contract; online summary is not applicable.');
+              return;
+            }
+            const delivery = await prepareDelivery(github, context, result, dir);
+            core.setOutput('parts', delivery.parts);
+            if (delivery.error) core.setFailed(delivery.error);
+      - name: Write online summary 1
+        if: always() && steps.delivery.outputs.parts >= 1
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 1
+      - name: Write online summary 2
+        if: always() && steps.delivery.outputs.parts >= 2
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 2
+      - name: Write online summary 3
+        if: always() && steps.delivery.outputs.parts >= 3
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 3
+      - name: Write online summary 4
+        if: always() && steps.delivery.outputs.parts >= 4
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 4
+      - name: Write online summary 5
+        if: always() && steps.delivery.outputs.parts >= 5
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 5
+      - name: Write online summary 6
+        if: always() && steps.delivery.outputs.parts >= 6
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 6
+      - name: Write online summary 7
+        if: always() && steps.delivery.outputs.parts >= 7
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 7
+      - name: Write online summary 8
+        if: always() && steps.delivery.outputs.parts >= 8
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 8
+      - name: Write online summary 9
+        if: always() && steps.delivery.outputs.parts >= 9
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 9
+      - name: Write online summary 10
+        if: always() && steps.delivery.outputs.parts >= 10
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 10
+      - name: Write online summary 11
+        if: always() && steps.delivery.outputs.parts >= 11
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 11
+      - name: Write online summary 12
+        if: always() && steps.delivery.outputs.parts >= 12
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 12
+      - name: Write online summary 13
+        if: always() && steps.delivery.outputs.parts >= 13
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 13
+      - name: Write online summary 14
+        if: always() && steps.delivery.outputs.parts >= 14
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 14
+      - name: Write online summary 15
+        if: always() && steps.delivery.outputs.parts >= 15
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 15
+      - name: Write online summary 16
+        if: always() && steps.delivery.outputs.parts >= 16
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 16
+      - name: Write online summary 17
+        if: always() && steps.delivery.outputs.parts >= 17
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 17
+      - name: Write online summary 18
+        if: always() && steps.delivery.outputs.parts >= 18
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 18
+      - name: Write online summary 19
+        if: always() && steps.delivery.outputs.parts >= 19
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 19
+      - name: Write online summary 20
+        if: always() && steps.delivery.outputs.parts >= 20
+        run: node "$RUNNER_TEMP/trusted-review/.agents/skills/code-review/scripts/ci-summary.mjs" "$RUNNER_TEMP/review-report" 20
+      - name: Confirm online delivery
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const dir = path.join(process.env.RUNNER_TEMP, 'review-report');
+            const file = path.join(dir, 'delivery.json');
+            if (!fs.existsSync(file)) { core.setFailed('Delivery metadata missing'); return; }
+            const delivery = JSON.parse(fs.readFileSync(file, 'utf8'));
+            delivery.confirmed = !delivery.error && !fs.existsSync(path.join(dir, 'summary-error')) &&
+              Array.from({ length: delivery.parts }, (_, i) => fs.existsSync(path.join(dir, 'summary-' + (i + 1) + '.ok'))).every(Boolean);
+            if (!delivery.confirmed) { delivery.error ||= 'Online summary delivery incomplete'; core.setFailed(delivery.error); }
+            fs.writeFileSync(file, JSON.stringify(delivery));
+      - name: Upload machine result including failure diagnostics
         id: upload
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: codex-review-report-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codex-review-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/review-report/
           if-no-files-found: error
           retention-days: 7
@@ -142,31 +246,48 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
-          name: codex-review-report-${{ github.run_id }}-${{ github.run_attempt }}
+          name: codex-review-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/review-report
       - name: Publish current head using trusted skill publisher
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          REPORT_ARTIFACT_URL: ${{ needs.review.outputs.artifact_url }}
         with:
           script: |
             const fs = require('node:fs');
             const path = require('node:path');
             const { pathToFileURL } = require('node:url');
             const trusted = path.join(process.env.RUNNER_TEMP, 'trusted-review/.agents/skills/code-review/scripts/ci-review.mjs');
-            const { assessReview, publish } = await import(pathToFileURL(trusted).href);
+            const { assessReview, publish, prepareDelivery } = await import(pathToFileURL(trusted).href);
             const dir = path.join(process.env.RUNNER_TEMP, 'review-report');
-            if (!fs.existsSync(path.join(dir, 'result.json')) || !fs.existsSync(path.join(dir, 'report.md'))) {
+            if (!fs.existsSync(path.join(dir, 'result.json'))) {
               assessReview(path.join(process.env.RUNNER_TEMP, 'missing-evidence'), dir, {
                 base: process.env.REVIEW_BASE_SHA, head: process.env.REVIEW_HEAD_SHA,
                 run: String(context.runId), attempt: process.env.GITHUB_RUN_ATTEMPT,
               });
             }
             const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
-            const report = fs.readFileSync(path.join(dir, 'report.md'), 'utf8');
+            const deliveryFile = path.join(dir, 'delivery.json');
+            const delivery = fs.existsSync(deliveryFile) ? JSON.parse(fs.readFileSync(deliveryFile, 'utf8')) : { error: 'Delivery metadata missing' };
             if (result.head !== process.env.REVIEW_HEAD_SHA || result.base !== process.env.REVIEW_BASE_SHA ||
                 String(result.run) !== String(context.runId) || String(result.attempt) !== process.env.GITHUB_RUN_ATTEMPT) {
               core.setFailed('Report identity mismatch; refusing publication.'); return;
             }
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            core.info(await publish(github, context, result, report, process.env.REPORT_ARTIFACT_URL || runUrl));
+            if (typeof prepareDelivery !== 'function') {
+              // Legacy publishers need only a verified result and report. Missing
+              // delivery metadata must not suppress the incomplete fallback report.
+              if (result.version !== undefined || fs.existsSync(deliveryFile) &&
+                  (delivery.mode !== 'legacy' || !delivery.confirmed || delivery.error)) {
+                core.setFailed('Legacy publication contract mismatch; refusing publication.'); return;
+              }
+              const reportFile = path.join(dir, 'report.md');
+              if (!fs.existsSync(reportFile)) { core.setFailed('Legacy report missing; refusing publication.'); return; }
+              const report = fs.readFileSync(reportFile, 'utf8');
+              if (!report.trim()) { core.setFailed('Legacy report empty; refusing publication.'); return; }
+              core.info(await publish(github, context, result, report, runUrl));
+            } else {
+              if (result.version !== 2 || delivery.mode === 'legacy') {
+                core.setFailed('Version 2 publication contract mismatch; refusing publication.'); return;
+              }
+              core.info(await publish(github, context, result, delivery));
+            }
+            if (delivery.error || !delivery.confirmed) core.setFailed(delivery.error || 'Delivery unconfirmed');

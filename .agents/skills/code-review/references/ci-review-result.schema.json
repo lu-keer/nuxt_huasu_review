@@ -1,32 +1,151 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "report", "tasks", "findings"],
+  "required": [
+    "status",
+    "report",
+    "tasks",
+    "findings",
+    "version",
+    "statistics"
+  ],
   "properties": {
-    "status": { "type": "string", "enum": ["complete", "incomplete"] },
-    "report": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "incomplete"
+      ]
+    },
+    "report": {
+      "type": "string"
+    },
     "tasks": {
       "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["rule", "agent", "status"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rule",
+          "agent",
+          "status"
+        ],
         "properties": {
-          "rule": { "type": "string", "enum": ["standards", "architect", "devops", "product_contract", "runtime_performance", "security"] },
-          "agent": { "type": "string" },
-          "status": { "type": "string" }
+          "rule": {
+            "type": "string",
+            "enum": [
+              "standards",
+              "architect",
+              "devops",
+              "product_contract",
+              "runtime_performance",
+              "security"
+            ]
+          },
+          "agent": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
         }
       }
     },
     "findings": {
       "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["severity", "file", "line", "title", "evidence", "trigger", "impact"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "file",
+          "line",
+          "title",
+          "evidence",
+          "trigger",
+          "impact",
+          "sources",
+          "side"
+        ],
         "properties": {
-          "severity": { "type": "string", "enum": ["Critical", "Major", "Minor"] },
-          "file": { "type": "string" }, "line": { "type": "integer" },
-          "title": { "type": "string" }, "evidence": { "type": "string" },
-          "trigger": { "type": "string" }, "impact": { "type": "string" }
+          "severity": {
+            "type": "string",
+            "enum": [
+              "Critical",
+              "Major",
+              "Minor"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "standards",
+                "architect",
+                "devops",
+                "product_contract",
+                "runtime_performance",
+                "security"
+              ]
+            }
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "head",
+              "base"
+            ]
+          }
+        }
+      }
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        2
+      ]
+    },
+    "statistics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discarded",
+        "merged"
+      ],
+      "properties": {
+        "discarded": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "merged": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
         }
       }
     }
