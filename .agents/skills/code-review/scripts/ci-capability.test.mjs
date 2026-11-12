@@ -1,5 +1,7 @@
+import { contract, strictFixture, controlFixture } from './ci-scheduling-fixture.test.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -44,6 +46,10 @@ function evidence(t, mode = 'probe') {
     { type: 'collab_agent_spawn_end', new_thread_id: 'control', control: true, status: 'running' },
     { type: 'collab_close_end', receiver_thread_id: 'control', status: 'shutdown' },
   ]
+  strictFixture(config, events, RULES)
+  controlFixture(events, config)
+  save(join(dir, 'config.json'), config)
+  save(join(dir, 'runtime-contract.json'), contract)
   save(join(dir, 'events.json'), events)
   return { dir, events, config }
 }
@@ -69,6 +75,23 @@ test('cancel request without host terminal does not unlock rehearsal', t => {
   save(join(dir, 'events.json'), events.filter(e => e.type !== 'collab_close_end'))
   assert.equal(assess(dir).checks.cancellation, 'UNVERIFIED')
   assert.equal(assess(dir).nativeReady, false)
+})
+
+test('missing bounded control execution never unlocks rehearsal', t => {
+  const { dir, events } = evidence(t)
+  save(join(dir, 'events.json'), events.filter(e => e.type !== 'control_hold'))
+  const report = assess(dir)
+  assert.equal(report.nativeReady, false)
+  assert.equal(report.controls.status, 'UNVERIFIED')
+})
+
+test('control tasks exceeding 30 seconds cannot certify native concurrency', t => {
+  const { dir, events } = evidence(t)
+  const end = events.find(e => e.type === 'worker_turn_completed' && e.thread === 'control-hold-0')
+  end.timestamp = new Date(Date.parse(end.timestamp) + 60000).toISOString()
+  save(join(dir, 'events.json'), events)
+  assert.equal(assess(dir).nativeReady, false)
+  assert.equal(assess(dir).controls.bounded, false)
 })
 
 test('late wait observations do not turn sequential worker execution into concurrency', t => {
@@ -159,12 +182,19 @@ test('summary distinguishes native and adapted rehearsal; absent artifacts remai
   const input = temporary(t)
   const output = join(temporary(t), 'report')
   assert.equal(summarize(input, output).conclusion, '原生方案暂不可接入')
+  const gate = () => spawnSync(process.execPath, [resolve('.agents/skills/code-review/scripts/ci-capability.mjs'), 'assert-complete', output], { encoding: 'utf8' })
+  assert.equal(gate().status, 1)
   const probe = evidence(t)
   const rehearsal = evidence(t, 'prepared')
   // Copy public fixture artifacts into the same layout as download-artifact.
   cpSync(probe.dir, join(input, 'capability-probe'), { recursive: true })
   cpSync(rehearsal.dir, join(input, 'capability-rehearsal'), { recursive: true })
   assert.equal(summarize(input, output).conclusion, '需最小适配后接入')
+  assert.equal(gate().status, 0)
+  const failed = JSON.parse(readFileSync(join(input, 'capability-probe/events.json')))
+  save(join(input, 'capability-probe/events.json'), failed.filter(e => e.type !== 'spawn_arguments'))
+  assert.equal(summarize(input, output).complete, false)
+  assert.equal(gate().status, 1)
 })
 
 
@@ -207,7 +237,7 @@ test('V2 runtime child metadata and host status prove identities without legacy 
     const args = source.find(e => e.type === 'spawn_arguments' && e.call_id === `call-${i}`)
     args.thread = 'parent'
     args.task = RULES[i]
-    source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
+    if (!source.some(e => e.type === 'session_meta' && e.thread === `worker-${i}`)) source.push({ type: 'session_meta', parent: 'parent', thread: `worker-${i}`, path: `/root/${RULES[i]}` })
   }
   source.push({ type: 'host_status', agents: RULES.map(rule => ({ path: `/root/${rule}`, status: 'completed', valid: true })) })
   save(join(dir, 'events.json'), source)

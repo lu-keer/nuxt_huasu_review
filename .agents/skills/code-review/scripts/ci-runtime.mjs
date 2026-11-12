@@ -49,9 +49,11 @@ export function projectRecord(record, thread, root, calls = new Map()) {
   const config = existsSync(configPath) ? json(configPath) : {}
   const acceptsOutput = status => validOutput(status, config.reviewFiles)
   const p = record.payload ?? {}
-  const base = { timestamp: record.timestamp, thread }
+  const base = { timestamp: record.timestamp, thread, order: record.ordinal }
   if (record.type === 'response_item' && p.type === 'function_call') {
     try { calls.set(`${thread}:${p.call_id}`, { name: p.name, cmd: JSON.parse(p.arguments).cmd }) } catch { /* invalid args */ }
+    const tool = p.name?.split('.').at(-1)
+    if (['wait', 'wait_agent', 'list_agents'].includes(tool)) return { ...base, type: 'tool_request', tool, call_id: p.call_id }
   }
   if (record.type === 'response_item' && p.type === 'function_call_output') {
     const call = calls.get(`${thread}:${p.call_id}`)
@@ -61,17 +63,29 @@ export function projectRecord(record, thread, root, calls = new Map()) {
     } } }, thread, root, calls)
   }
   if (record.type === 'session_meta') return { ...base, type: 'session_meta', thread: p.id, parent: p.parent_thread_id ?? p.source?.subagent?.thread_spawn?.parent_thread_id, path: p.agent_path ?? p.source?.subagent?.thread_spawn?.agent_path, cli: p.cli_version }
-  if (record.type === 'turn_context') return { ...base, type: 'turn_context', model: p.model, sandbox: p.sandbox_policy?.type }
+  if (record.type === 'turn_context') return { ...base, type: 'turn_context', model: p.model, effort: p.effort ?? p.reasoning_effort, sandbox: p.sandbox_policy?.type }
   // 0.167.1 persists completed typed items, not the transient exec/collab events.
   if (record.type === 'event_msg' && p.type === 'item_completed') {
     const item = p.item ?? {}
     if (item.type === 'CommandExecution') return projectRecord({ ...record, payload: { ...item, type: 'exec_command_end' } }, thread, root)
     if (item.type === 'FunctionCallOutput') {
       const output = typeof item.output === 'string' ? item.output : Array.isArray(item.output) ? item.output.filter(x => x.type === 'input_text').map(x => x.text).join('\n') : ''
+      if (/(?:^|\.)spawn_agent$/.test(item.name)) {
+        try {
+          const parsed = JSON.parse(output)
+          const path = parsed.task_name ?? parsed.agent_name
+          const id = parsed.agent_id ?? parsed.thread_id
+          if (typeof path !== 'string' && typeof id !== 'string') return null
+          return { ...base, type: 'tool_return', tool: 'spawn_agent', call_id: item.id,
+            ...(/^\/root\/[a-z0-9_]+$/i.test(path ?? '') ? { path } : {}),
+            ...(typeof id === 'string' && /^[a-z0-9-]+$/i.test(id) ? { id } : {}) }
+        } catch { return null }
+      }
+      if (/(?:^|\.)(wait|wait_agent)$/.test(item.name)) return { ...base, type: 'tool_return', tool: item.name.split('.').at(-1), call_id: item.id }
       if (/(?:^|\.)list_agents$/.test(item.name)) {
         try {
           const parsed = JSON.parse(output)
-          return { ...base, type: 'host_status', agents: (parsed.agents ?? []).filter(a => /^\/root\/[a-z0-9_]+$/i.test(a.agent_name)).map(a => ({ path: a.agent_name, status: statusName(a.agent_status), valid: acceptsOutput(a.agent_status) })) }
+          return { ...base, type: 'host_status', call_id: item.id, agents: (parsed.agents ?? []).filter(a => /^\/root\/[a-z0-9_]+$/i.test(a.agent_name)).map(a => ({ path: a.agent_name, status: statusName(a.agent_status), valid: acceptsOutput(a.agent_status) })) }
         } catch { return null }
       }
       // Some history modes persist exec output only as a typed function output.
@@ -93,6 +107,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
       const types = { spawn_agent: 'collab_agent_spawn_end', wait: 'collab_waiting_end', close_agent: 'collab_close_end' }
       if (!types[item.tool]) return null
       return projectRecord({ ...record, payload: { ...item, type: types[item.tool], call_id: item.id,
+        returned: item.status === 'completed',
         new_thread_id: item.receiver_thread_ids?.[0], receiver_thread_id: item.receiver_thread_ids?.[0], statuses: item.agents_states } }, thread, root)
     }
     return null
@@ -101,6 +116,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
     try {
       const args = JSON.parse(p.arguments)
       return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model'),
+        overridesEffort: Object.hasOwn(args, 'reasoning_effort'), forkTurns: ['none', 'all'].includes(args.fork_turns) ? args.fork_turns : null,
         task: /^[a-z0-9_]+$/i.test(args.task_name ?? '') ? args.task_name : undefined,
         control: args.message?.includes('CONTROL_CANCEL') === true || args.task_name === 'control_cancel' }
     } catch { return null }
@@ -113,6 +129,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
   }
   if (/^collab_(agent_spawn|waiting|close|agent_interaction)_(begin|end)$/.test(p.type)) {
     const out = { ...base, type: p.type }
+    if (p.returned === true) out.returned = true
     for (const key of ['call_id', 'sender_thread_id', 'receiver_thread_id', 'new_thread_id', 'model', 'reasoning_effort']) {
       if (typeof p[key] === 'string') out[key] = p[key]
     }
@@ -128,6 +145,9 @@ export function projectRecord(record, thread, root, calls = new Map()) {
   }
   if (p.type === 'exec_command_end') {
     const command = p.command?.at(-1)
+    if (command === `node ${join(root, 'skill/scripts/ci-capability.mjs')} control-hold ${root}`) return {
+      ...base, type: 'control_hold', exitCode: p.exit_code === 0 ? 0 : 1,
+    }
     if (command === `node ${join(root, 'skill/scripts/build-review-manifest.mjs')} --base ${config.base}`) {
       return { ...base, type: 'operation', operation: 'build-snapshot', status: p.exit_code === 0 ? 'PASS' : 'FAIL', exitCode: p.exit_code }
     }
@@ -175,7 +195,8 @@ for (const file of rolloutFiles(join(root, 'codex-home'))) {
   const meta = records.find(r => r.type === 'session_meta')
   const inherited = records.some(r => r.type === 'session_meta' && r.payload.id !== meta?.payload.id)
   const boundary = meta?.payload.subagent_history_start_ordinal
-  for (const record of records) {
+  for (const [order, raw] of records.entries()) {
+    const record = { ...raw, ordinal: Number.isSafeInteger(raw.ordinal) ? raw.ordinal : order }
     try {
       const kind = `${record.type}/${record.payload?.type ?? ''}/${record.payload?.item?.type ?? ''}`
       inventory[kind] = (inventory[kind] ?? 0) + 1
@@ -185,7 +206,7 @@ for (const file of rolloutFiles(join(root, 'codex-home'))) {
         if (thread) continue
         thread = record.payload.id
       } else if (Number.isSafeInteger(boundary)) {
-        if (!Number.isSafeInteger(record.ordinal) || record.ordinal < boundary) continue
+        if (!Number.isSafeInteger(raw.ordinal) || raw.ordinal < boundary) continue
       } else if (inherited) {
         // Legacy physical forks lack a reliable ordinal boundary. Fail closed
         // instead of assigning inherited parent activity to this worker.

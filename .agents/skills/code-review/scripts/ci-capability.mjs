@@ -1,3 +1,5 @@
+import { queryRuntimeContract } from './ci-runtime-contract.mjs'
+import { assessScheduling, assessControls, EVIDENCE_VERSION, WORKER_CAPACITY } from './ci-scheduling.mjs'
 import { CLI_VERSION, ACTION_SHA, RULES, inside, canonical, scanRollouts, assessWorkers, atomic, readBundle } from './ci-runtime.mjs'
 export { CLI_VERSION, ACTION_SHA, RULES, projectRecord } from './ci-runtime.mjs'
 // CI capability harness only. Production review policy remains in SKILL.md.
@@ -30,9 +32,9 @@ export function prepare(root, mode, skill = defaultSkill) {
   if (!['probe', 'native', 'prepared'].includes(mode)) throw new Error('invalid capability mode')
   if (existsSync(root)) throw new Error('capability root must not exist')
   mkdirSync(root, { recursive: true })
-  for (const dir of ['private', 'public', 'fixture', 'runtime-tmp', 'codex-home']) mkdirSync(join(root, dir))
-  if (mode === 'prepared') writeFileSync(join(root, 'codex-home/config.toml'),
-    `[permissions.capability-temp]\nextends = ":read-only"\n[permissions.capability-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n`)
+  for (const dir of ['private', 'public', 'fixture', 'controller', 'runtime-tmp', 'codex-home']) mkdirSync(join(root, dir))
+  writeFileSync(join(root, 'codex-home/config.toml'), `project_doc_max_bytes = 0\n[agents]\nmax_concurrent_threads_per_session = ${WORKER_CAPACITY}\n` + (mode === 'prepared' ?
+    `[permissions.capability-temp]\nextends = ":read-only"\n[permissions.capability-temp.filesystem]\n${JSON.stringify(join(root, 'runtime-tmp').replaceAll('\\', '/'))} = "write"\n` : ''))
   cpSync(skill, join(root, 'skill'), { recursive: true })
   const fixture = join(root, 'fixture')
   run('git', ['init', '-q'], fixture)
@@ -64,7 +66,7 @@ export function prepare(root, mode, skill = defaultSkill) {
   const delivery = Array.from({ length: 700 }, (_, i) => `capability-delivery-line-${String(i).padStart(4, '0')}\n`).join('')
   writeFileSync(join(root, 'delivery-input.txt'), delivery)
   save(join(root, 'public/config.json'), {
-    mode, cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: mode === 'prepared' ? 'temp-write-only' : 'read-only',
+    mode, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', workerCapacity: WORKER_CAPACITY, cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: mode === 'prepared' ? 'temp-write-only' : 'read-only',
     safety: 'drop-sudo', endpoint: 'https://gptapi001.huasu.org/v1/responses',
     commit: process.env.GITHUB_SHA ?? 'local', base, root, manifestPath,
     run: process.env.GITHUB_RUN_ID ?? 'local', attempt: process.env.GITHUB_RUN_ATTEMPT ?? 'local',
@@ -79,7 +81,7 @@ export function prepare(root, mode, skill = defaultSkill) {
   const command = op => `node ${script} operation ${root} ${op}`
   const template = readFileSync(join(root, `skill/references/ci-capability-${mode === 'probe' ? 'probe' : 'rehearsal'}.md`), 'utf8')
   writeFileSync(join(root, 'private/prompt.md'), `${template}\n\n## 本次固定参数\n\n` +
-    `mode: ${mode}\n可信 SKILL: ${join(root, 'skill/SKILL.md')}\n项目目录: ${fixture}\nbase: ${base}\n` +
+    `control-hold: node ${script} control-hold ${root}\n\nmode: ${mode}\n可信 SKILL: ${join(root, 'skill/SKILL.md')}\n项目目录: ${fixture}\nbase: ${base}\n` +
     `prepared manifest: ${manifestPath}\ndelivery 输入: ${join(root, 'delivery-input.txt')}\n` +
     `原版 helper: node ${helper} --base ${base} （cwd=${fixture}）\n` +
     `select-manifest: node ${script} select-manifest ${root} <原版helper返回的绝对路径>\n\n` +
@@ -180,10 +182,10 @@ export function assess(directory) {
   const unique = new Set(workers.map(w => w.id).filter(Boolean)).size === RULES.length
   const hashes = new Set(workers.flatMap(w => w.reads.map(r => `${r.manifestHash}:${r.patchHash}`)))
   result.delegation = unique && hashes.size === 1 && workers.every(w => w.status === 'completed') ? 'PASS' : 'UNVERIFIED'
-  const overlapping = workers.some((a, i) => workers.slice(i + 1).some(b =>
-    a.runningFrom && a.runningUntil && b.runningFrom && b.runningUntil &&
-    Date.parse(a.runningFrom) < Date.parse(b.runningUntil) && Date.parse(b.runningFrom) < Date.parse(a.runningUntil)))
-  result.concurrency_model = overlapping && workers.every(w => w.modelConfirmed) ? 'PASS' : 'UNVERIFIED'
+  const contract = existsSync(join(directory, 'runtime-contract.json')) ? json(join(directory, 'runtime-contract.json')) : null
+  const scheduling = assessScheduling(events, config, contract)
+  const controls = config.mode === 'probe' ? assessControls(events, config, contract) : null
+  result.concurrency_model = scheduling.status === 'PASS' && workers.every(w => w.modelConfirmed) ? 'PASS' : scheduling.status === 'FAIL' ? 'FAIL' : 'UNVERIFIED'
   const control = spawnEvents.find(e => e.control && !workers.some(w => w.id === e.new_thread_id))
   const hostControl = status => events.some(e => e.type === 'host_status' && e.agents?.some(a => a.path === control?.path && a.status === status))
   const cancelled = control && (hostControl('interrupted') || events.some(e => e.type === 'collab_close_end' && e.receiver_thread_id === control.new_thread_id && terminal(e.status) && e.status !== 'completed'))
@@ -198,8 +200,9 @@ export function assess(directory) {
       (config.mode === 'prepared' || result.snapshot === 'PASS') && result.permissions === 'PASS' &&
       final && ['Standards', 'AI Review Rules', 'Summary'].every(label => final.report.includes(label)) ? 'PASS' : 'UNVERIFIED'
   }
-  const nativeReady = ['environment', 'skill', 'delegation', 'concurrency_model', 'cancellation', 'instructions', 'delivery'].every(id => result[id] === 'PASS') && op('write-source') === 'PASS'
-  return { mode: config.mode, checks: result, workers, nativeReady, rehearsalMode: result.snapshot === 'PASS' ? 'native' : 'prepared', outcome,
+  if (config.mode === 'probe') result.scheduling_controls = controls.status
+  const nativeReady = ['environment', 'skill', 'delegation', 'concurrency_model', 'cancellation', 'instructions', 'delivery', 'scheduling_controls'].every(id => result[id] === 'PASS') && op('write-source') === 'PASS'
+  return { mode: config.mode, checks: result, workers, scheduling, controls, nativeReady, rehearsalMode: result.snapshot === 'PASS' ? 'native' : 'prepared', outcome,
     evidence: 'events.json；任务耗时接口未提供则不可用，事件时间仅用于判断执行区间重叠。',
     instructionLimit: '仅验证无害标记未改变本次输出，不等于证明指令未被加载或普遍防注入。' }
 }
@@ -214,7 +217,8 @@ export function summarize(input, output) {
   if (probe?.nativeReady && rehearsal?.checks.rehearsal === 'PASS' && probe.checks.instructions === 'PASS' && rehearsal.checks.delivery === 'PASS') {
     conclusion = rehearsal.mode === 'native' && probe.checks.snapshot === 'PASS' && probe.checks.permissions === 'PASS' ? '可直接接入' : '需最小适配后接入'
   }
-  save(join(output, 'assessment.json'), { conclusion, reports })
+  const complete = probe?.nativeReady === true && rehearsal?.checks.rehearsal === 'PASS' && rehearsal?.checks.delivery === 'PASS'
+  save(join(output, 'assessment.json'), { complete, conclusion, reports })
   const lines = ['# code-review CI 能力验证', '', `结论：${conclusion}`, '',
     '缺失事件、终态或输出一律 UNVERIFIED；没有进行云端运行时不能视为接入完成。', '']
   for (const report of reports) {
@@ -228,7 +232,7 @@ export function summarize(input, output) {
     if (config.runUrl) lines.push(`Actions：${config.runUrl}`, '')
   }
   writeFileSync(join(output, 'report.md'), lines.join('\n') + '\n')
-  return { conclusion, probe }
+  return { complete, conclusion, probe }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -239,6 +243,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT },
     })
     child.unref()
+    if ((await queryRuntimeContract(resolve(root))).status !== 'PASS') throw new Error('Pinned runtime contract could not be verified; no model call allowed')
+  } else if (command === 'control-hold') {
+    // Trusted fixture control only; no source access, network or model executor.
+    await new Promise(done => setTimeout(done, 20000))
+    process.stdout.write('CAPABILITY_EVIDENCE {"operation":"control-hold","status":"PASS"}\n')
   } else if (command === 'observe') await observe(resolve(root))
   else if (command === 'operation') {
     const result = operation(resolve(root), value)
@@ -249,6 +258,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const config = json(join(root, 'public/config.json'))
     if (canonical(manifest.repositoryRoot) !== canonical(join(resolve(root), 'fixture')) || manifest.baseCommit !== config.base) throw new Error('unexpected manifest')
     save(join(root, 'private/selected.json'), { manifestPath: path })
+  } else if (command === 'assert-complete') {
+    if (json(join(resolve(root), 'assessment.json')).complete !== true) {
+      process.stderr.write('Strict capability or full rehearsal is incomplete; see capability-report artifact.\n')
+      process.exitCode = 1
+    }
   } else if (command === 'summarize') {
     const result = summarize(resolve(root), resolve(value))
     if (process.env.GITHUB_OUTPUT) {
