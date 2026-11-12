@@ -101,8 +101,39 @@ function onClose() {
   color: #1e293b;
   background: white;
   box-shadow: 0 24px 64px #0f172a33;
+  opacity: 0;
+  transform: translateY(12px) scale(.96);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    display 180ms allow-discrete,
+    overlay 180ms allow-discrete;
 }
-.app-dialog::backdrop { background: #0f172a80; }
+.app-dialog[open] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.app-dialog::backdrop {
+  background: #0f172a00;
+  transition:
+    background-color 180ms ease,
+    display 180ms allow-discrete,
+    overlay 180ms allow-discrete;
+}
+.app-dialog[open]::backdrop { background: #0f172a80; }
+
+@starting-style {
+  .app-dialog[open] {
+    opacity: 0;
+    transform: translateY(12px) scale(.96);
+  }
+  .app-dialog[open]::backdrop { background: #0f172a00; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog,
+  .app-dialog::backdrop { transition: none; }
+}
 .app-dialog__panel { padding: 24px; }
 .app-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .app-dialog__title { margin: 0; font-size: 20px; }
