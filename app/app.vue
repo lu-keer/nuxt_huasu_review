@@ -2,6 +2,12 @@
 const visible = ref(false)
 const loading = ref(false)
 const message = ref('点击按钮，体验公共弹窗。')
+const activeTab = ref<string | number>('overview')
+const tabs = [
+  { value: 'overview', label: '项目概览' },
+  { value: 'details', label: '详细信息' },
+  { value: 'settings', label: '设置', disabled: true },
+]
 
 async function confirm() {
   if (loading.value) return
@@ -29,6 +35,20 @@ async function confirm() {
         <button type="button" class="demo__open" @click="visible = true">打开弹窗</button>
         <p role="status">{{ message }}</p>
       </div>
+      <section>
+        <h2>公共选项卡示例</h2>
+        <AppTabs v-model="activeTab" :items="tabs" aria-label="项目信息">
+          <template #panel-overview>
+            <h3>项目概览</h3>
+            <p>通过 v-model 绑定当前选项，使用具名插槽自定义各项内容。</p>
+          </template>
+          <template #panel-details>
+            <h3>详细信息</h3>
+            <p>支持点击或使用左右方向键、Home、End 切换，禁用项会自动跳过。</p>
+          </template>
+        </AppTabs>
+        <p>当前选项：{{ activeTab }}</p>
+      </section>
     </div>
 
     <AppDialog
