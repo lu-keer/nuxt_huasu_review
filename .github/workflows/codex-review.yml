@@ -76,6 +76,20 @@ jobs:
               await new Promise(resolve => setTimeout(resolve, 500));
             }
             core.setFailed('Observer did not seal evidence; review is incomplete.');
+      # Temporary acceptance fault, never merge this branch.
+      - name: Acceptance only - remove spawn return evidence
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const file = path.join(process.env.RUNNER_TEMP, 'codex-pr-review/public/events.json');
+            const events = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const filtered = events.filter(event => !(event.type === 'tool_return' && event.tool === 'spawn_agent') && event.type !== 'collab_agent_spawn_end');
+            if (filtered.length === events.length) core.setFailed('Fault injection had no spawn return to remove.');
+            fs.writeFileSync(file, JSON.stringify(filtered, null, 2));
+            core.info(`Acceptance injection removed ${events.length - filtered.length} spawn return records.`);
       - name: Upload public execution evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
