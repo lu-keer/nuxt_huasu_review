@@ -195,3 +195,5 @@ jobs:
           name: capability-report
           path: ${{ runner.temp }}/capability-report/
           retention-days: 7
+      - name: Require strict capability and full rehearsal
+        run: node .agents/skills/code-review/scripts/ci-capability.mjs assert-complete "$RUNNER_TEMP/capability-report"

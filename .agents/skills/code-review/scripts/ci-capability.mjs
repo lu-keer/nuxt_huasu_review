@@ -217,7 +217,8 @@ export function summarize(input, output) {
   if (probe?.nativeReady && rehearsal?.checks.rehearsal === 'PASS' && probe.checks.instructions === 'PASS' && rehearsal.checks.delivery === 'PASS') {
     conclusion = rehearsal.mode === 'native' && probe.checks.snapshot === 'PASS' && probe.checks.permissions === 'PASS' ? '可直接接入' : '需最小适配后接入'
   }
-  save(join(output, 'assessment.json'), { conclusion, reports })
+  const complete = probe?.nativeReady === true && rehearsal?.checks.rehearsal === 'PASS' && rehearsal?.checks.delivery === 'PASS'
+  save(join(output, 'assessment.json'), { complete, conclusion, reports })
   const lines = ['# code-review CI 能力验证', '', `结论：${conclusion}`, '',
     '缺失事件、终态或输出一律 UNVERIFIED；没有进行云端运行时不能视为接入完成。', '']
   for (const report of reports) {
@@ -231,7 +232,7 @@ export function summarize(input, output) {
     if (config.runUrl) lines.push(`Actions：${config.runUrl}`, '')
   }
   writeFileSync(join(output, 'report.md'), lines.join('\n') + '\n')
-  return { conclusion, probe }
+  return { complete, conclusion, probe }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -257,6 +258,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const config = json(join(root, 'public/config.json'))
     if (canonical(manifest.repositoryRoot) !== canonical(join(resolve(root), 'fixture')) || manifest.baseCommit !== config.base) throw new Error('unexpected manifest')
     save(join(root, 'private/selected.json'), { manifestPath: path })
+  } else if (command === 'assert-complete') {
+    if (json(join(resolve(root), 'assessment.json')).complete !== true) {
+      process.stderr.write('Strict capability or full rehearsal is incomplete; see capability-report artifact.\n')
+      process.exitCode = 1
+    }
   } else if (command === 'summarize') {
     const result = summarize(resolve(root), resolve(value))
     if (process.env.GITHUB_OUTPUT) {

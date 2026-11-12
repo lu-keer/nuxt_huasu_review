@@ -1,6 +1,7 @@
 import { contract, strictFixture, controlFixture } from './ci-scheduling-fixture.test.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -181,12 +182,19 @@ test('summary distinguishes native and adapted rehearsal; absent artifacts remai
   const input = temporary(t)
   const output = join(temporary(t), 'report')
   assert.equal(summarize(input, output).conclusion, '原生方案暂不可接入')
+  const gate = () => spawnSync(process.execPath, [resolve('.agents/skills/code-review/scripts/ci-capability.mjs'), 'assert-complete', output], { encoding: 'utf8' })
+  assert.equal(gate().status, 1)
   const probe = evidence(t)
   const rehearsal = evidence(t, 'prepared')
   // Copy public fixture artifacts into the same layout as download-artifact.
   cpSync(probe.dir, join(input, 'capability-probe'), { recursive: true })
   cpSync(rehearsal.dir, join(input, 'capability-rehearsal'), { recursive: true })
   assert.equal(summarize(input, output).conclusion, '需最小适配后接入')
+  assert.equal(gate().status, 0)
+  const failed = JSON.parse(readFileSync(join(input, 'capability-probe/events.json')))
+  save(join(input, 'capability-probe/events.json'), failed.filter(e => e.type !== 'spawn_arguments'))
+  assert.equal(summarize(input, output).complete, false)
+  assert.equal(gate().status, 1)
 })
 
 

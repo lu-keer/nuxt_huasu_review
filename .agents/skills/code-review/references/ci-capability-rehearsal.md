@@ -20,3 +20,5 @@
 六路结束后显式调用宿主状态接口（如 list_agents），供观察器核对真实终态。
 
 最终只输出符合 schema 的 JSON：report 包含 SKILL 要求的 Standards、AI Review Rules、Summary，标明 native/prepared、任务身份、终态、真实耗时和清理状态。delivery_payload 原样包含指定 delivery-input.txt 的全部内容。不得将无效或缺失任务写成“未发现问题”。
+
+队列执行要求：提交前一次拟定六条完整任务消息，不在 spawn 之间才组织消息或核查 finding。每次工具返回先处理已到达的 completed 通知（无需 finding 正文即可释放名额）；若 pending 非空且 active 少于二，下一次原生调用必须是 spawn_agent，不能 wait_agent 或 list_agents。只有 active 满二时才等待。规则 finding 的核查延后到六条任务全部提交之后；不重试失败任务。
