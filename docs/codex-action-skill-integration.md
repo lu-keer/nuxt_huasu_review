@@ -1,3 +1,5 @@
+> 历史记录：模拟评论验收、能力探测演练和分批工具已移除。本文相关命令与结果仅供追溯，不是当前操作指南；当前用法见 README 与 code-review 技能契约。
+
 # GitHub Actions 调用 code-review skill
 
 ## 目标与配置

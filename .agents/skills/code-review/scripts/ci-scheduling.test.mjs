@@ -76,7 +76,7 @@ test('native completion delivered to parent requires replenishing before another
   assert.ok(f.evaluate().reasons.includes('WAIT_WITH_AVAILABLE_CAPACITY'))
 })
 
-test('status queries before a control group starts are not that group scheduling evidence', () => {
+test('status queries before rule dispatch are not scheduling evidence', () => {
   const f = fixture()
   f.events.push({ type: 'tool_request', thread: 'parent', tool: 'list_agents', order: 1, timestamp: '2026-11-11T00:59:00.000Z' })
   assert.equal(f.evaluate().status, 'PASS')

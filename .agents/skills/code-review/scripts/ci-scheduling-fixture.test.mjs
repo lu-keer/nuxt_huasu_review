@@ -16,24 +16,3 @@ export function strictFixture(config, events, rules) {
     }
   }
 }
-
-export function controlFixture(events, config) {
-  for (const [groupIndex, kind] of ['fast', 'hold'].entries()) {
-    const rules = Array.from({ length: 6 }, (_, i) => `control_${kind}_${i}`)
-    const controls = rules.flatMap((rule, i) => [
-      { type: 'spawn_arguments', call_id: `control-${kind}-${i}`, overridesModel: false },
-      { type: 'turn_context', thread: `worker-${i}`, model: config.model },
-      { type: 'worker_turn_started', thread: `worker-${i}` },
-      { type: 'worker_turn_completed', thread: `worker-${i}`, valid: true },
-    ])
-    strictFixture(config, controls, rules)
-    for (const e of controls) {
-      if (e.thread?.startsWith('worker-')) e.thread = e.thread.replace('worker-', `control-${kind}-`)
-      if (e.id?.startsWith('worker-')) e.id = e.id.replace('worker-', `control-${kind}-`)
-      if (e.timestamp) e.timestamp = new Date(Date.parse(e.timestamp) + 120000 + groupIndex * 120000).toISOString()
-      if (e.order) e.order += 1000 + groupIndex * 1000
-    }
-    events.push(...controls)
-    if (kind === 'hold') events.push(...rules.map((_, i) => ({ type: 'control_hold', thread: `control-hold-${i}`, exitCode: 0 })))
-  }
-}

@@ -10,7 +10,7 @@ export const json = path => JSON.parse(readFileSync(path, 'utf8'))
 export const save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n')
 export const rulePath = id => id === 'standards' ? 'references/standards.md' : `references/ai_review_rules/${id}.md`
 export const statusName = value => typeof value === 'string' ? value : Object.keys(value ?? {})[0] ?? 'unknown'
-export function validOutput(status, files = ['sample.js']) {
+export function validOutput(status, files = []) {
   const output = status?.completed
   return typeof output === 'string' && (output.trim() === 'NO_FINDINGS' ||
     /Critical|Major|Minor/.test(output) && files.some(file => output.includes(file)) && /\d+/.test(output))
@@ -117,8 +117,7 @@ export function projectRecord(record, thread, root, calls = new Map()) {
       const args = JSON.parse(p.arguments)
       return { ...base, type: 'spawn_arguments', call_id: p.call_id, overridesModel: Object.hasOwn(args, 'model'),
         overridesEffort: Object.hasOwn(args, 'reasoning_effort'), forkTurns: ['none', 'all'].includes(args.fork_turns) ? args.fork_turns : null,
-        task: /^[a-z0-9_]+$/i.test(args.task_name ?? '') ? args.task_name : undefined,
-        control: args.message?.includes('CONTROL_CANCEL') === true || args.task_name === 'control_cancel' }
+        task: /^[a-z0-9_]+$/i.test(args.task_name ?? '') ? args.task_name : undefined }
     } catch { return null }
   }
   if (record.type !== 'event_msg') return null
@@ -139,22 +138,14 @@ export function projectRecord(record, thread, root, calls = new Map()) {
       out.statuses = Object.fromEntries(Object.entries(statuses).map(([id, value]) => [id, statusName(value)]))
       out.valid_outputs = Object.fromEntries(Object.entries(statuses).map(([id, value]) => [id, acceptsOutput(value)]))
     }
-    // Only a fixed marker is retained, never the prompt itself.
-    if (p.prompt?.includes('CONTROL_CANCEL')) out.control = true
     return out
   }
   if (p.type === 'exec_command_end') {
     const command = p.command?.at(-1)
-    if (command === `node ${join(root, 'skill/scripts/ci-capability.mjs')} control-hold ${root}`) return {
-      ...base, type: 'control_hold', exitCode: p.exit_code === 0 ? 0 : 1,
-    }
-    if (command === `node ${join(root, 'skill/scripts/build-review-manifest.mjs')} --base ${config.base}`) {
-      return { ...base, type: 'operation', operation: 'build-snapshot', status: p.exit_code === 0 ? 'PASS' : 'FAIL', exitCode: p.exit_code }
-    }
-    const prefix = `node ${join(root, 'skill/scripts', config.entrypoint ?? 'ci-capability.mjs')} operation ${root} `
+    const prefix = `node ${join(root, 'skill/scripts', config.entrypoint ?? 'ci-review.mjs')} operation ${root} `
     if (typeof command !== 'string' || !command.startsWith(prefix)) return null
     const op = command.slice(prefix.length)
-    if (!['read-skill', 'build-snapshot', 'write-source', 'write-temp', 'read-instructions', ...RULES.map(id => `read-${id}`)].includes(op)) return null
+    if (!['read-skill', ...RULES.map(id => `read-${id}`)].includes(op)) return null
     const line = p.aggregated_output?.split('\n').find(line => line.startsWith('CAPABILITY_EVIDENCE '))
     let evidence
     try { evidence = JSON.parse(line.slice('CAPABILITY_EVIDENCE '.length)) } catch { return null }
@@ -226,13 +217,12 @@ export function assessWorkers(events, config) {
   // V2 exposes thread identity/model in activity and real status via list_agents.
   // Match through runtime-owned path/ID, never through the final model report.
   const spawnRecords = [...events.filter(e => e.type === 'collab_agent_spawn_end' && e.new_thread_id),
-    ...activities.filter(e => e.kind === 'started').map(e => ({ ...e, new_thread_id: e.id,
-      control: events.some(a => a.type === 'spawn_arguments' && a.call_id === e.call_id && a.control) })),
+    ...activities.filter(e => e.kind === 'started').map(e => ({ ...e, new_thread_id: e.id })),
     ...events.filter(e => e.type === 'session_meta' && e.parent && e.path).flatMap(e => {
       const args = events.find(a => a.type === 'spawn_arguments' && a.thread === e.parent && e.path === `/root/${a.task}`)
       if (!args) return []
       const context = events.find(a => a.type === 'turn_context' && a.thread === e.thread)
-      return [{ ...e, new_thread_id: e.thread, call_id: args.call_id, control: args.control, model: context?.model }]
+      return [{ ...e, new_thread_id: e.thread, call_id: args.call_id, model: context?.model }]
     })]
   // Different durable/legacy sources can describe the same worker. Merge by
   // runtime identity so an earlier partial spawn cannot hide its V2 path.
