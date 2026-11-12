@@ -2,7 +2,7 @@
 
 ## 实际 PR 验收（2026-11-12）
 
-PR #10 已转为 ready，用于接受旧 base 的常规代码审查；严格能力与正式路径未全部验收前仍不合入。新增临时 PR #11/#12/#13，base 均为实现分支，不合入 fixture 或故障注入。该方式提前验证可信 base 导出，不能冒充合入 main 后的新 base 验收。
+PR #10 已转为 ready，用于接受旧 base 的常规代码审查；发布前严格能力与完整 prepared 演练现已通过；合入后仍需复验 main 作为可信 base。新增临时 PR #11/#12/#13，base 均为实现分支，不合入 fixture 或故障注入。该方式提前验证可信 base 导出，不能冒充合入 main 后的新 base 验收。
 
 已在固定 CLI `0.167.1` 的实际 `config/read` 验证六个有效 worker 名额（不含主会话），可信 config/context 记录 workerCapacity 并与运行时证据匹配。首轮六次原生提交完成后才等待；快速任务无需人为保持。按容量判定仍支持两名额分组排队且已有回归测试；没有放宽证据缺失、提前等待或配置覆盖门槛。
 
@@ -16,7 +16,9 @@ PR #10 已转为 ready，用于接受旧 base 的常规代码审查；严格能�
 
 缺证据仅由 #13 临时 workflow 的固定基础设施步骤在 observer 封存后移除 spawn 返回事件，仍使用 base 校验器；未提供正式诊断宽松模式或模型提示词自证入口。原始请求、六路终态与 findings 保留。该分支不得合入。
 
-发现并修正能力工作流只输出报告却仍绿色的问题：现在在完整 artifact 上传后执行 assert-complete，缺少严格能力或完整演练均失败。[43132168594](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132168594) 已实际验证控制调度 FAIL 时 report job 失败、完整报告仍可下载。新六名额能力运行 [43132964708](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708) 尚待完成及核对。
+发现并修正能力工作流只输出报告却仍绿色的问题：现在在完整 artifact 上传后执行 assert-complete，缺少严格能力或完整演练均失败。[43132168594](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132168594) 已实际验证控制调度 FAIL 时 report job 失败、完整报告仍可下载。新六名额能力运行 [43132964708](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708) 已完成并核对全部四个 artifact：complete=true，probe/prepared 六路调度均 PASS，六路身份、材料、实际模型/effort、有效终态齐全；快速控制最大并发 1，保持控制最大并发 4，30 秒/5 分钟边界通过。prepared 源码拒写、临时目录可写、长消息交付通过，核实保留 double 从乘二改乘三的 1 项 Major。probe 中原版 helper 的只读写入拒绝属于已知适配限制，不表述为原版 helper 在沙箱中成功。最终严格 report job 成功。
+
+能力 artifact：[完整报告](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13907396252)、[probe 证据](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13906682014)、[prepared 证据](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13907530752)。本地使用最终校验器重算三个真实 PR artifact，结果与云端一致。
 
 本地针对性测试现为 55 项通过，新增六名额下提前等待失败及容量不匹配未验证用例；固定 CLI 的真实无模型查询、actionlint 与 git diff 检查通过。上述小型样本不证明与改造前本地审查全面等价。
 
