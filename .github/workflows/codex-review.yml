@@ -124,6 +124,17 @@ jobs:
               base: process.env.REVIEW_BASE_SHA, head: process.env.REVIEW_HEAD_SHA, run: String(context.runId), attempt: process.env.GITHUB_RUN_ATTEMPT,
             });
             const result = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+            // An upgrade PR still runs the trusted tools exported from its old base.
+            // Keep that base's result and publisher contract; never load head tools here.
+            if (typeof prepareDelivery !== 'function') {
+              if (result.version !== undefined) { core.setFailed('Unsupported trusted delivery contract'); return; }
+              fs.writeFileSync(path.join(dir, 'delivery.json'), JSON.stringify({
+                mode: 'legacy', required: false, parts: 0, url: null, error: null,
+              }));
+              core.setOutput('parts', 0);
+              core.info('Trusted base uses the legacy report contract; online summary is not applicable.');
+              return;
+            }
             const delivery = await prepareDelivery(github, context, result, dir);
             core.setOutput('parts', delivery.parts);
             if (delivery.error) core.setFailed(delivery.error);
@@ -245,7 +256,7 @@ jobs:
             const path = require('node:path');
             const { pathToFileURL } = require('node:url');
             const trusted = path.join(process.env.RUNNER_TEMP, 'trusted-review/.agents/skills/code-review/scripts/ci-review.mjs');
-            const { assessReview, publish } = await import(pathToFileURL(trusted).href);
+            const { assessReview, publish, prepareDelivery } = await import(pathToFileURL(trusted).href);
             const dir = path.join(process.env.RUNNER_TEMP, 'review-report');
             if (!fs.existsSync(path.join(dir, 'result.json'))) {
               assessReview(path.join(process.env.RUNNER_TEMP, 'missing-evidence'), dir, {
@@ -261,5 +272,19 @@ jobs:
               core.setFailed('Report identity mismatch; refusing publication.'); return;
             }
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            core.info(await publish(github, context, result, delivery));
+            if (typeof prepareDelivery !== 'function') {
+              if (result.version !== undefined || delivery.mode !== 'legacy' || !delivery.confirmed || delivery.error) {
+                core.setFailed('Legacy publication contract mismatch; refusing publication.'); return;
+              }
+              const reportFile = path.join(dir, 'report.md');
+              if (!fs.existsSync(reportFile)) { core.setFailed('Legacy report missing; refusing publication.'); return; }
+              const report = fs.readFileSync(reportFile, 'utf8');
+              if (!report.trim()) { core.setFailed('Legacy report empty; refusing publication.'); return; }
+              core.info(await publish(github, context, result, report, runUrl));
+            } else {
+              if (result.version !== 2 || delivery.mode === 'legacy') {
+                core.setFailed('Version 2 publication contract mismatch; refusing publication.'); return;
+              }
+              core.info(await publish(github, context, result, delivery));
+            }
             if (delivery.error || !delivery.confirmed) core.setFailed(delivery.error || 'Delivery unconfirmed');

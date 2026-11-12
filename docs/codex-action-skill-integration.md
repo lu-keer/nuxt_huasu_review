@@ -223,3 +223,12 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 评论完整时仅生成机器结果，不生成重复 report.md，也不提供下载式报告入口。超长详情写入 review job 的 Job Summary，每步最多 900,000 字节、最多 20 步；通过当前 run/attempt 的 Actions API 查询真实 review job ID，生成运行总览的 `#summary-{jobId}` 直达链接。写入或定位失败时发布明确交付失败提示，检查失败，仍保留有效问题和机器结果。摘要继承 Actions 权限和运行保留周期，不是永久文档。
 
 机器结果与白名单原始证据分别通过 artifact 跨 job 传递，保留 7 天；artifact 不作为在线文档入口。隐藏标记、固定 head/run/attempt 校验及过期发布保护不变。详见 [评论规范](ci-review-comment-spec.md)。实现分支真实六路与受控展示验收已通过，未合入默认分支；详见 [评论模板验收记录](ci-review-comment-validation.md)。
+# 升级 PR 的可信 base 兼容
+
+工作流与可信脚本可能处于不同版本：`pull_request` 使用变更后的工作流，而脚本仍从固定 base 导出。升级 PR 不得改为执行 head 中的脚本来绕过此边界。
+
+- 可信模块提供 `prepareDelivery` 时，使用 version 2 机器结果和新发布接口。
+- 可信模块没有该接口时，仅接受没有版本字段的旧结果，保留旧 base 生成的 `report.md`，以报告字符串调用旧发布接口；不调用摘要辅助脚本。
+- 缺失报告、契约不匹配或身份不匹配时拒绝发布，不能将对象隐式转为评论正文。
+- 此兼容路径只用于旧 base；main 合入新版 skill 后，普通 PR 使用新模板，不额外生成重复报告。升级 PR 自身的旧模板不能作为新模板验收证据。
+
