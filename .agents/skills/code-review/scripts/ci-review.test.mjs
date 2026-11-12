@@ -125,7 +125,7 @@ function runtimeEvidence(t) {
   const root = temp(t), output = join(root, 'assessment')
   const config = { base: 'a'.repeat(40), head: 'b'.repeat(40), run: '10', attempt: '1', model: 'gpt-6.1-sol', textFileCount: 1, reviewFiles: ['widget.ts'],
     manifestHash: digest('manifest'), patchHash: digest('patch'), skillHash: digest('skill'), ruleHashes: Object.fromEntries(RULES.map(r => [r, digest(r)])) }
-  const final = { status: 'complete', report: '## Standards\nNO_FINDINGS\n## AI Review Rules\nNO_FINDINGS\n## Summary\n完成。',
+  const final = { version: 2, statistics: { discarded: 0, merged: 0 }, status: 'complete', report: '## Standards\nNO_FINDINGS\n## AI Review Rules\nNO_FINDINGS\n## Summary\n完成。',
     tasks: RULES.map(rule => ({ rule, agent: `/root/${rule}`, status: 'completed' })), findings: [] }
   const time = n => `2026-11-11T01:00:${String(n).padStart(2, '0')}.000Z`
   const events = [
@@ -155,7 +155,7 @@ function runtimeEvidence(t) {
 
 test('real-file native evidence passes; valid findings do not block review', t => {
   const f = runtimeEvidence(t)
-  f.final.findings.push({ severity: 'Major', file: 'widget.ts', line: 1, title: 'Changed value', evidence: 'value = 2', trigger: 'Existing callers', impact: 'Wrong result' })
+  f.final.findings.push({ sources: ['standards'], side: 'head', severity: 'Major', file: 'widget.ts', line: 1, title: 'Changed value', evidence: 'value = 2', trigger: 'Existing callers', impact: 'Wrong result' })
   f.final.report += '\nMajor widget.ts:1 Changed value\n'
   f.persist()
   const a = assessReview(f.root, f.output, { head: f.config.head, run: '10', attempt: '1' })
@@ -187,7 +187,7 @@ test('missing artifact and malformed findings retain explicit incomplete status'
 test('strict policy, capacity and spawn returns are required while valid findings survive failure', t => {
   for (const scenario of ['policy', 'capacity', 'return', 'effort']) {
     const f = runtimeEvidence(t)
-    f.final.findings.push({ severity: 'Minor', file: 'widget.ts', line: 1, title: 'Retained finding', evidence: 'value = 2', trigger: 'caller', impact: 'wrong value' })
+    f.final.findings.push({ sources: ['standards'], side: 'head', severity: 'Minor', file: 'widget.ts', line: 1, title: 'Retained finding', evidence: 'value = 2', trigger: 'caller', impact: 'wrong value' })
     f.final.report += '\nMinor widget.ts:1 Retained finding\n'
     if (scenario === 'policy') delete f.config.schedulingPolicy
     if (scenario === 'capacity') rmSync(join(f.root, 'runtime-contract.json'))
@@ -201,22 +201,8 @@ test('strict policy, capacity and spawn returns are required while valid finding
   }
 })
 
-test('long report keeps complete artifact and publishes summary without truncated findings', t => {
-  const root = temp(t)
-  const result = { head: 'b'.repeat(40), run: '10', attempt: '1', status: 'complete', counts: { Critical: 0, Major: 1, Minor: 0 } }
-  const report = '完整报告正文\n'.repeat(12000)
-  writeFileSync(join(root, 'report.md'), report)
-  const body = commentBody(result, report, 'https://example.invalid/run', 'https://example.invalid/artifact')
-  assert.ok(Array.from(body).length < 50000)
-  assert.match(body, /完整报告与证据/)
-  assert.doesNotMatch(body, /已截断/)
-  assert.equal(readFileSync(join(root, 'report.md'), 'utf8'), report)
-  assert.equal(newerComment(`<!-- codex-run ${result.head} 11 1 -->`, result), true)
-  assert.equal(newerComment(`<!-- codex-run ${result.head} 10 2 -->`, result), true)
-})
-
 test('publisher rechecks head after pagination and never overwrites a newer same-SHA attempt', async t => {
-  const result = { head: 'b'.repeat(40), run: '10', attempt: '1', status: 'complete', counts: { Critical: 0, Major: 0, Minor: 0 } }
+  const result = { version: 2, head: 'b'.repeat(40), run: '10', attempt: '1', status: 'complete', counts: { Critical: 0, Major: 0, Minor: 0 } }
   let writes = 0
   const context = { repo: { owner: 'owner', repo: 'repo' }, payload: { pull_request: { number: 1 } }, serverUrl: 'https://github.com', runId: '10' }
   const github = { paginate: async () => [], rest: { issues: { listComments() {}, createComment: async () => { writes++ }, updateComment: async () => { writes++ } },

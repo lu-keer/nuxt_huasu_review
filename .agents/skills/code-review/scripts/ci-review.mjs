@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { CLI_VERSION, ACTION_SHA, RULES, canonical, inside, digest, json, save, rulePath,
   redact, scanRollouts, atomic, assessWorkers, readBundle } from './ci-runtime.mjs'
 
+import { RESULT_VERSION, makeComment, splitSummary } from './ci-comment.mjs'
+
 const ownSkill = dirname(dirname(fileURLToPath(import.meta.url)))
 const sha = value => /^[a-f0-9]{40}$/.test(value ?? '')
 function git(repo, args) {
@@ -61,6 +63,10 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   const config = {
     version: 1, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', workerCapacity: WORKER_CAPACITY, entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
     repositoryRoot: repo, root, manifestPath, reviewFiles: manifest.textFiles, textFileCount: manifest.textFileCount,
+    locations: Object.fromEntries(manifest.textFiles.map(file => [file, Object.fromEntries([['head', head], ['base', base]].map(([side, commit]) => {
+      const shown = spawnSync('git', ['show', `${commit}:${file}`], { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+      return [side, shown.status === 0 ? (shown.stdout.match(/\n/g)?.length ?? 0) + (shown.stdout && !shown.stdout.endsWith('\n') ? 1 : 0) : null]
+    }))])),
     cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: 'temp-write-only',
     manifestHash: digest(readFileSync(manifestPath)), patchHash: digest(Buffer.concat(manifest.layers.map(l => readFileSync(l.patchPath)))),
     skillHash: digest(readFileSync(join(root, 'skill/SKILL.md'))),
@@ -78,7 +84,7 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   if (!manifest.textFileCount) {
     save(join(root, 'public/events.json'), [])
     save(join(root, 'public/outcome.json'), { action: 'skipped' })
-    save(join(root, 'public/final.json'), { status: 'complete', report: '## Standards\n无可审查文本变更。\n\n## AI Review Rules\n未启动规则任务。\n\n## Summary\n没有可审查文本变更。', tasks: [], findings: [] })
+    save(join(root, 'public/final.json'), { version: RESULT_VERSION, statistics: { discarded: null, merged: null }, status: 'complete', report: '## Standards\n无可审查文本变更。\n\n## AI Review Rules\n未启动规则任务。\n\n## Summary\n没有可审查文本变更。', tasks: [], findings: [] })
     writeFileSync(join(root, 'public/observer-complete'), 'no reviewable text\n')
   }
   return config
@@ -114,13 +120,15 @@ export function readMaterial(root, operation) {
 }
 
 export function validateResult(value, config) {
+  if (value?.version !== RESULT_VERSION) throw new Error('unsupported result version; version 2 required')
+  if (!value.statistics || !['discarded', 'merged'].every(k => value.statistics[k] === null || Number.isSafeInteger(value.statistics[k]) && value.statistics[k] >= 0)) throw new Error('invalid statistics')
   if (!value || !['complete', 'incomplete'].includes(value.status) || typeof value.report !== 'string' || !value.report.trim() ||
       !['Standards', 'AI Review Rules', 'Summary'].every(s => value.report.includes(s)) || !Array.isArray(value.tasks) || !Array.isArray(value.findings)) throw new Error('invalid final result')
   for (const task of value.tasks) if (!RULES.includes(task.rule) || typeof task.agent !== 'string' || typeof task.status !== 'string') throw new Error('invalid task result')
   for (const finding of value.findings) {
     if (!['Critical', 'Major', 'Minor'].includes(finding.severity) || !config.reviewFiles.includes(finding.file) ||
         !Number.isSafeInteger(finding.line) || finding.line < 1 || !['title', 'evidence', 'trigger', 'impact'].every(key => typeof finding[key] === 'string' && finding[key].trim()) ||
-        !value.report.includes(finding.file) || !value.report.includes(finding.severity)) throw new Error('invalid finding')
+        !Array.isArray(finding.sources) || !finding.sources.length || new Set(finding.sources).size !== finding.sources.length || !finding.sources.every(r => RULES.includes(r)) || !['head', 'base'].includes(finding.side)) throw new Error('invalid finding')
   }
   return value
 }
@@ -189,30 +197,45 @@ export function assessReview(input, output, expected = {}) {
   if (!complete && !reasons.length) reasons.push('审查未完成')
   const findings = final?.findings ?? []
   const counts = Object.fromEntries(['Critical', 'Major', 'Minor'].map(s => [s, findings.filter(f => f.severity === s).length]))
-  const metadata = { status: complete ? 'complete' : 'incomplete', base: expected.base ?? config?.base, head: expected.head ?? config?.head,
-    run: expected.run ?? config?.run, attempt: expected.attempt ?? config?.attempt, counts, reasons, workers, outcome, scheduling, configuration: scheduling.configuration ?? null }
-  const header = `审查 head：${metadata.head ?? '未知'}\n\n可信 skill 来源 base：${metadata.base ?? '未知'}\n\nCLI：${CLI_VERSION}；模型：gpt-6.1-sol / low\n\n整体状态：${complete ? '完成' : '未完成'}\n\n`
-  const schedulingReport = `调度验收：${config?.textFileCount === 0 ? 'N/A（无可审查文本）' : scheduling.status}；原因：${scheduling.reasons.join(', ') || '无'}\n\n`
-  const report = header + schedulingReport + (final?.report ?? '## Standards\n审查未完成。\n\n## AI Review Rules\n未取得有效报告。\n\n## Summary\n执行失败，不能判定未发现问题。') +
-    (reasons.length ? '\n\n未完成原因：\n' + reasons.map(r => `- ${r}`).join('\n') : '')
+  const metadata = { version: RESULT_VERSION, status: complete ? 'complete' : 'incomplete', base: expected.base ?? config?.base, head: expected.head ?? config?.head,
+    run: expected.run ?? config?.run, attempt: expected.attempt ?? config?.attempt, counts, reasons, workers, outcome, scheduling, configuration: scheduling.configuration ?? null,
+    findings, statistics: final?.statistics ?? { discarded: null, merged: null }, textFileCount: config?.textFileCount ?? null,
+    manifestHash: config?.manifestHash, locations: config?.locations ?? {}, cli: CLI_VERSION, model: config?.model ?? null, effort: config?.effort ?? null }
   save(join(output, 'result.json'), metadata)
-  writeFileSync(join(output, 'report.md'), report + '\n')
   return metadata
 }
 
-export function commentBody(result, report, runUrl, artifactUrl) {
-  const stamp = `<!-- codex-pr-review -->\n<!-- codex-run ${result.head} ${result.run} ${result.attempt} -->`
-  const full = `${stamp}\n\n## Codex PR 审查\n\n${report}\n\n[完整报告与证据](${artifactUrl}) · [Actions](${runUrl})`
-  if (Array.from(full).length <= 50000) return full
-  const tasks = (result.workers ?? []).map(w => `${w.rule}: ${w.status}`).join('；') || '没有规则任务证据'
-  return `${stamp}\n\n## Codex PR 审查\n\n审查 head：${result.head}\n\n整体状态：${result.status === 'complete' ? '完成' : '未完成'}\n\n调度：${result.scheduling?.status ?? 'UNVERIFIED'}；${result.scheduling?.reasons?.join(', ') ?? '证据不可用'}\n\n任务：${tasks}\n\nCritical ${result.counts.Critical} / Major ${result.counts.Major} / Minor ${result.counts.Minor}\n\n报告较长，全部 findings 保存在[完整报告与证据](${artifactUrl})中。\n\n[Actions](${runUrl})`
+export function commentBody(result, repoUrl, runUrl, documentUrl) {
+  return makeComment(result, repoUrl, runUrl, documentUrl).body
 }
+
+export async function prepareDelivery(github, context, result, output) {
+  const repoUrl = context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo
+  const runUrl = repoUrl + '/actions/runs/' + context.runId
+  const delivery = { required: false, parts: 0, url: null, error: null }
+  try {
+    const rendered = makeComment(result, repoUrl, runUrl)
+    if (rendered.summary) {
+      delivery.required = true
+      const chunks = splitSummary(rendered.summary)
+      const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { ...context.repo, run_id: context.runId, attempt_number: Number(result.attempt), per_page: 100 })
+      const job = jobs.find(j => j.name === 'review' && j.run_id === Number(context.runId))
+      if (!job?.html_url || !job.html_url.startsWith(runUrl + '/job/')) throw new Error('review job URL unavailable')
+      chunks.forEach((chunk, i) => writeFileSync(join(output, 'summary-' + (i + 1) + '.md'), chunk))
+      delivery.parts = chunks.length
+      delivery.url = job.html_url
+    }
+  } catch (error) { delivery.error = redact(error.message) }
+  save(join(output, 'delivery.json'), delivery)
+  return delivery
+}
+
 export function newerComment(body, result) {
   const stamp = body?.match(/<!-- codex-run ([a-f0-9]{40}) (\d+) (\d+) -->/)
   if (!stamp || stamp[1] !== result.head) return false
   return BigInt(stamp[2]) > BigInt(result.run) || stamp[2] === String(result.run) && BigInt(stamp[3]) > BigInt(result.attempt)
 }
-export async function publish(github, context, result, report, artifactUrl) {
+export async function publish(github, context, result, delivery = {}) {
   const { owner, repo } = context.repo
   const number = context.payload.pull_request.number
   const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 })
@@ -221,7 +244,10 @@ export async function publish(github, context, result, report, artifactUrl) {
   const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number })
   if (pr.state !== 'open' || pr.draft || pr.head.sha !== result.head) return 'stale'
   const url = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-  const body = commentBody(result, report, url, artifactUrl ?? url)
+  if (result.version !== RESULT_VERSION) throw new Error('unsupported publication result version')
+  const repoUrl = `${context.serverUrl}/${owner}/${repo}`
+  const docUrl = delivery.confirmed && !delivery.error && delivery.url?.startsWith(url + '/job/') ? delivery.url : null
+  const body = commentBody(result, repoUrl, url, docUrl)
   if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
   else await github.rest.issues.createComment({ owner, repo, issue_number: number, body })
   return 'published'

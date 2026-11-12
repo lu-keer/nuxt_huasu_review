@@ -21,7 +21,7 @@
 1. `execute`（40 分钟、contents:read）：检出事件 head SHA，导出事件 base SHA 的完整 skill，缺失即失败。skill 内 `ci-review.mjs prepare` 检查干净 HEAD、提交、路径与四层材料，使用原 helper 的 `base...HEAD` 语义预构建，记录 merge-base 和摘要。
 2. 从仓库外 controller 调用一次 Codex Action，显式读取可信 SKILL 与 context。PR checkout 作为只读数据；不加载 head 配置作为调度指令。六路各自读取规则和同一完整材料，独立上下文、继承模型，容量不足排队。保留 10 分钟单任务、30 分钟整场及 30 秒收尾预算。
 3. Codex 后只运行固定基础设施封存及上传步骤，不执行仓库脚本。observer 仅投影白名单宿主证据，排除继承历史，不上传 raw rollout。
-4. `review`（5 分钟、contents:read）：独立下载 artifact，调用 base 的可信校验器，关联真实六路身份、材料、模型和终态；交付完整 report.md/result.json。保留检查名 review。
+4. `review`（5 分钟、contents:read）：独立下载 artifact，调用 base 的可信校验器，关联真实六路身份、材料、模型和终态；交付版本化 result.json；评论超长时交付 Job Summary。保留检查名 review。
 5. `comment`（5 分钟、仅此 job 有评论写权限）：调用 base 中 publisher。artifact 只作为数据，发布前重新检查 PR 仍开放、非草稿且 head 一致；相同 head 的旧 run/attempt 不覆盖新报告。
 
 CI context/result schema、可信提示词及全部适配模块均位于 skill 内。原本地调用方式继续有效；CI 禁止再次构建或回退材料。材料归调用方持有；终态未知时保留目录和任务身份，由 runner 生命周期回收。
@@ -215,3 +215,11 @@ PR：https://github.com/lu-keer/nuxt_huasu_review/pull/2 。本次保留正式 P
 - 不恢复本地自动审查。后续 workflow 故障可回退 PR #4 的正式 workflow 切换；能力验证 workflow 保留用于 CLI/Action 升级回归。
 
 验证范围限制：没有在真实 PR 强制生成超过 50,000 字符的模型报告或执行源码写入尝试。长报告摘要/完整保存经本地机械测试，源码拒写/临时可写及模型长消息经独立能力回归验证，不将其冒充正式 PR 中重复执行的结果。
+
+## 固定评论模板（实现分支）
+
+正文固定为 Standards、AI Review Rules、Summary，五条规则表格展示。问题来源与剔除/合并统计通过 version 2 schema 传递；未知统计为 null。独立校验状态优先于模型自述。
+
+评论完整时仅生成机器结果，不生成重复 report.md，也不提供下载式报告入口。超长详情写入 review job 的 Job Summary，每步最多 900,000 字节、最多 20 步；通过当前 run/attempt 的 Actions API 查询真实 job URL。写入或定位失败时发布明确交付失败提示，检查失败，仍保留有效问题和机器结果。摘要继承 Actions 权限和运行保留周期，不是永久文档。
+
+机器结果与白名单原始证据分别通过 artifact 跨 job 传递，保留 7 天；artifact 不作为在线文档入口。隐藏标记、固定 head/run/attempt 校验及过期发布保护不变。详见 [评论规范](ci-review-comment-spec.md)。默认分支是否已上线及真实验证见后续验收记录。
