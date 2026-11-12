@@ -273,7 +273,10 @@ jobs:
             }
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             if (typeof prepareDelivery !== 'function') {
-              if (result.version !== undefined || delivery.mode !== 'legacy' || !delivery.confirmed || delivery.error) {
+              // Legacy publishers need only a verified result and report. Missing
+              // delivery metadata must not suppress the incomplete fallback report.
+              if (result.version !== undefined || fs.existsSync(deliveryFile) &&
+                  (delivery.mode !== 'legacy' || !delivery.confirmed || delivery.error)) {
                 core.setFailed('Legacy publication contract mismatch; refusing publication.'); return;
               }
               const reportFile = path.join(dir, 'report.md');

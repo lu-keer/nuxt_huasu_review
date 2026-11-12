@@ -24,7 +24,13 @@ function fixture(t, modern) {
   writeFileSync(join(dir, 'report.md'), '## Standards\nLegacy verified report')
   const failures = [], calls = []
   const core = { info() {}, setOutput() {}, setFailed: x => failures.push(x) }
-  const tools = { publish: async (...args) => { calls.push(args); return 'published' } }
+  const tools = {
+    publish: async (...args) => { calls.push(args); return 'published' },
+    assessReview: () => {
+      writeFileSync(join(dir, 'result.json'), JSON.stringify({ ...result, status: 'incomplete' }))
+      writeFileSync(join(dir, 'report.md'), '## Standards\n审查未完成：执行证据缺失')
+    },
+  }
   if (modern) tools.prepareDelivery = async () => {
     const delivery = { required: false, parts: 0, url: null, error: null }
     writeFileSync(join(dir, 'delivery.json'), JSON.stringify(delivery))
@@ -63,4 +69,20 @@ test('workflow refuses a new result paired with legacy tools', async t => {
   await f.run('Prepare optional online summary')
   assert.match(f.failures[0], /Unsupported trusted delivery contract/)
   assert.equal(f.calls.length, 0)
+})
+test('legacy missing artifact publishes an incomplete fallback and still fails delivery', async t => {
+  const f = fixture(t, false)
+  rmSync(join(f.dir, 'result.json')); rmSync(join(f.dir, 'report.md'))
+  await f.run('Publish current head using trusted skill publisher')
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls[0][2].status, 'incomplete')
+  assert.match(f.calls[0][3], /审查未完成/)
+  assert.match(f.failures[0], /Delivery metadata missing/)
+})
+test('legacy explicitly failed delivery is not accepted as a missing artifact fallback', async t => {
+  const f = fixture(t, false)
+  writeFileSync(join(f.dir, 'delivery.json'), JSON.stringify({ mode: 'legacy', confirmed: false, error: 'write failed' }))
+  await f.run('Publish current head using trusted skill publisher')
+  assert.equal(f.calls.length, 0)
+  assert.match(f.failures[0], /Legacy publication contract mismatch/)
 })
