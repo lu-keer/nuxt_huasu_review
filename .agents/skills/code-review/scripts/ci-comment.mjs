@@ -28,9 +28,11 @@ export function renderReview(result, repoUrl, compact = false, indexCount = Infi
   const outcome = rule => empty ? '无可审查文本' : ids(rule) || (worker(rule)?.status === 'completed' && covered(rule) ? '未发现问题' : '未取得完整核实结果')
   const detail = f => `- **${f.id} · ${f.severity}：${escapeText(f.title)}** — ${location(f, result, repoUrl)}\n\n  触发条件：${escapeText(f.trigger)}\n  代码依据：${escapeText(f.evidence)}\n  影响：${escapeText(f.impact)}`
   const scope = rule => covered(rule) ? `覆盖全部 ${result.textFileCount} 个可审查文本文件` : '完整覆盖未确认'
+  const aiRules = RULES.filter(r => r !== 'standards')
+  const allCovered = aiRules.every(covered)
   const parts = ['### Standards', empty ? '无可审查文本变更，未启动 Standards 审查。' : `${state('standards')}，${scope('standards')}；${outcome('standards')}。`]
   if (!compact) parts.push(...findings.filter(f => f.sources.includes('standards')).map(detail))
-  parts.push('### AI Review Rules', '规则路径相对于 `.agents/skills/code-review/`；各项覆盖范围按实际读取证据确认。', '| 规则路径 | 实际状态 | 核实结果与覆盖 |\n|---|---|---|\n' + RULES.filter(r => r !== 'standards').map(r => `| \`references/ai_review_rules/${r}.md\` | ${state(r)} | ${outcome(r)}${empty ? '' : `；${scope(r)}`} |`).join('\n'))
+  parts.push('### AI Review Rules', `${!empty && allCovered ? `以下五项均覆盖全部 ${result.textFileCount} 个可审查文本文件；` : ''}规则路径相对于 \`.agents/skills/code-review/\`。`, '| 规则路径 | 实际状态 | 核实结果 |\n|---|---|---|\n' + aiRules.map(r => `| \`references/ai_review_rules/${r}.md\` | ${state(r)} | ${outcome(r)}${empty || allCovered ? '' : `；${scope(r)}`} |`).join('\n'))
   if (!compact) parts.push(...findings.filter(f => !f.sources.includes('standards')).map(detail))
   parts.push('### Summary')
   if (empty && result.status === 'complete') parts.push('本次范围检查完成，没有可审查文本变更，未调用模型或启动 worker。未产生审查问题；剔除及合并不适用。')
