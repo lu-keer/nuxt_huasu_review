@@ -220,10 +220,10 @@ export async function prepareDelivery(github, context, result, output) {
       const chunks = splitSummary(rendered.summary)
       const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { ...context.repo, run_id: context.runId, attempt_number: Number(result.attempt), per_page: 100 })
       const job = jobs.find(j => j.name === 'review' && j.run_id === Number(context.runId))
-      if (!job?.html_url || !job.html_url.startsWith(runUrl + '/job/')) throw new Error('review job URL unavailable')
+      if (!Number.isSafeInteger(job?.id) || !job.html_url?.startsWith(runUrl + '/job/')) throw new Error('review job URL unavailable')
       chunks.forEach((chunk, i) => writeFileSync(join(output, 'summary-' + (i + 1) + '.md'), chunk))
       delivery.parts = chunks.length
-      delivery.url = job.html_url
+      delivery.url = runUrl + '#summary-' + job.id
     }
   } catch (error) { delivery.error = redact(error.message) }
   save(join(output, 'delivery.json'), delivery)
@@ -246,7 +246,7 @@ export async function publish(github, context, result, delivery = {}) {
   const url = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
   if (result.version !== RESULT_VERSION) throw new Error('unsupported publication result version')
   const repoUrl = `${context.serverUrl}/${owner}/${repo}`
-  const docUrl = delivery.confirmed && !delivery.error && delivery.url?.startsWith(url + '/job/') ? delivery.url : null
+  const docUrl = delivery.confirmed && !delivery.error && delivery.url?.startsWith(url + '#summary-') && /^\d+$/.test(delivery.url.slice((url + '#summary-').length)) ? delivery.url : null
   const body = commentBody(result, repoUrl, url, docUrl)
   if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
   else await github.rest.issues.createComment({ owner, repo, issue_number: number, body })

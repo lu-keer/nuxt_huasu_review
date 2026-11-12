@@ -83,11 +83,11 @@ test('delivery uses API job URL and persists failure without fake document link'
   const dir = mkdtempSync(join(tmpdir(), 'comment-delivery-'))
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const r = fixture(), context = { repo: { owner: 'owner', repo: 'repo' }, serverUrl: 'https://github.com', runId: 10 }
-  const api = { paginate: async () => [{ name: 'review', run_id: 10, html_url: run + '/job/123' }], rest: { actions: { listJobsForWorkflowRunAttempt() {} } } }
+  const api = { paginate: async () => [{ id: 123, name: 'review', run_id: 10, html_url: run + '/job/123' }], rest: { actions: { listJobsForWorkflowRunAttempt() {} } } }
   assert.equal((await prepareDelivery(api, context, r, dir)).required, false)
   r.findings = [{ ...finding(), evidence: 'large '.repeat(20000) }]; r.counts.Major = 1
   const ok = await prepareDelivery(api, context, r, dir)
-  assert.equal(ok.url, run + '/job/123'); assert.ok(readFileSync(join(dir, 'summary-1.md'), 'utf8').includes(r.head))
+  assert.equal(ok.url, run + '#summary-123'); assert.ok(readFileSync(join(dir, 'summary-1.md'), 'utf8').includes(r.head))
   writeSummaryPart(dir, 1, join(dir, 'step-summary'))
   assert.equal(readFileSync(join(dir, 'summary-1.ok'), 'utf8'), 'written')
   assert.throws(() => writeSummaryPart(dir, 1, null), /unavailable/)
