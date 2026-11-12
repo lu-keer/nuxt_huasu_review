@@ -11,12 +11,12 @@ import { projectRecord } from './ci-runtime.mjs'
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'runtime-contract-'))
   for (const dir of ['public', 'controller', 'codex-home']) mkdirSync(join(root, dir))
-  writeFileSync(join(root, 'codex-home/config.toml'), '[agents]\nmax_concurrent_threads_per_session = 2\n')
+  writeFileSync(join(root, 'codex-home/config.toml'), '[agents]\nmax_concurrent_threads_per_session = 6\n')
   t.after(() => rmSync(root, { recursive: true, force: true }))
   return root
 }
 
-for (const [capacity, status] of [[2, 'PASS'], [3, 'UNVERIFIED'], [null, 'UNVERIFIED']]) test(`effective capacity ${capacity} yields ${status}`, async t => {
+for (const [capacity, status] of [[6, 'PASS'], [3, 'UNVERIFIED'], [null, 'UNVERIFIED']]) test(`effective capacity ${capacity} yields ${status}`, async t => {
   const root = fixture(t)
   const result = await queryRuntimeContract(root, (binary, args, options) => {
     assert.equal(binary, 'npx')

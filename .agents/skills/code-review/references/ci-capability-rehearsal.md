@@ -1,6 +1,6 @@
 # CI skill 完整演练
 
-严格调度：可信配置固定两个子任务名额，不含主会话。维护 pending/active 队列，先连续提交两个 spawn；收到宿主完成事件就立即补位，不先 list_agents/wait_agent 再确认一次。只有 active 已满且无已知完成事件时才查询或等待。全部六路提交后再统一等待收尾。每个 worker 显式 fork_turns: "none"，不传 model 或 reasoning_effort；真实配置和请求/返回由观察器核验，缺失时不宣称通过。
+严格调度：可信配置固定六个子任务名额，不含主会话。维护 pending/active 队列，先连续提交六个 spawn；收到宿主完成事件就立即补位，不先 list_agents/wait_agent 再确认一次。只有 active 已满且无已知完成事件时才查询或等待。全部六路提交后再统一等待收尾。每个 worker 显式 fork_turns: "none"，不传 model 或 reasoning_effort；真实配置和请求/返回由观察器核验，缺失时不宣称通过。
 
 本轮与能力探测处于不同 job，不复用旧任务、不重试失败规则。只审指定临时 fixture，真实项目不得修改。不读取认证配置、完整环境变量或代理日志，不安装依赖、不访问网络。
 
@@ -21,4 +21,6 @@
 
 最终只输出符合 schema 的 JSON：report 包含 SKILL 要求的 Standards、AI Review Rules、Summary，标明 native/prepared、任务身份、终态、真实耗时和清理状态。delivery_payload 原样包含指定 delivery-input.txt 的全部内容。不得将无效或缺失任务写成“未发现问题”。
 
-队列执行要求：提交前一次拟定六条完整任务消息，不在 spawn 之间才组织消息或核查 finding。每次工具返回先处理已到达的 completed 通知（无需 finding 正文即可释放名额）；若 pending 非空且 active 少于二，下一次原生调用必须是 spawn_agent，不能 wait_agent 或 list_agents。只有 active 满二时才等待。规则 finding 的核查延后到六条任务全部提交之后；不重试失败任务。
+队列执行要求：提交前一次拟定六条完整任务消息，不在 spawn 之间才组织消息或核查 finding。每次工具返回先处理已到达的 completed 通知（无需 finding 正文即可释放名额）；若 pending 非空且 active 少于六，下一次原生调用必须是 spawn_agent，不能 wait_agent 或 list_agents。只有 active 满六时才等待。规则 finding 的核查延后到六条任务全部提交之后；不重试失败任务。
+
+本次有效容量经可信预检确认为六。对六路首轮或每组六个控制任务，必须先完成全部六次 spawn_agent 调用，再调用任何 wait_agent/list_agents；即使较早任务已完成也继续提交，不停下来收取结果。不要求六个执行区间重叠，不人为延长规则任务。

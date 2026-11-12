@@ -24,6 +24,18 @@ test('two slots permit grouped dispatch and waits only at capacity', () => {
   assert.equal(f.evaluate().maximumActualConcurrency, 2)
 })
 
+test('six verified slots require all six submissions before waiting, even for naturally fast tasks', () => {
+  const f = fixture()
+  f.config.workerCapacity = 6
+  const proof = { ...contract, workerCapacity: 6 }
+  assert.equal(f.evaluate(proof).status, 'PASS')
+  f.events.push({ type: 'tool_request', thread: 'parent', tool: 'wait_agent', order: 45, call_id: 'early', timestamp: '2026-11-11T01:00:02.000Z' },
+    { type: 'tool_return', thread: 'parent', tool: 'wait_agent', order: 46, call_id: 'early', timestamp: '2026-11-11T01:00:03.000Z' })
+  assert.equal(f.evaluate(proof).status, 'FAIL')
+  assert.ok(f.evaluate(proof).reasons.includes('WAIT_WITH_AVAILABLE_CAPACITY'))
+  assert.equal(f.evaluate({ ...proof, workerCapacity: 2 }).status, 'UNVERIFIED')
+})
+
 test('milliseconds of overlap do not excuse waiting with a free slot', () => {
   const f = fixture()
   f.events.push({ type: 'tool_request', thread: 'parent', tool: 'list_agents', order: 25, call_id: 'early', timestamp: '2026-11-11T01:00:00.500Z' })

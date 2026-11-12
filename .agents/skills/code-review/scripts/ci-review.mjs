@@ -59,7 +59,7 @@ export function prepareReview(repo, root, base, head, skill = ownSkill) {
   const catalog = ['standards', ...manifest.ruleCatalog.map(rule => rule.path.split('/').at(-1).replace(/\.md$/, ''))]
   if ([...catalog].sort().join(',') !== [...RULES].sort().join(',')) throw new Error('unexpected rule catalog; update the CI adapter explicitly')
   const config = {
-    version: 1, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
+    version: 1, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', workerCapacity: WORKER_CAPACITY, entrypoint: 'ci-review.mjs', base, head, mergeBase: git(repo, ['merge-base', base, head]),
     repositoryRoot: repo, root, manifestPath, reviewFiles: manifest.textFiles, textFileCount: manifest.textFileCount,
     cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: 'temp-write-only',
     manifestHash: digest(readFileSync(manifestPath)), patchHash: digest(Buffer.concat(manifest.layers.map(l => readFileSync(l.patchPath)))),
@@ -91,7 +91,7 @@ export function readMaterial(root, operation) {
   try {
     const context = json(join(root, 'private/context.json'))
     if (context.evidenceVersion !== EVIDENCE_VERSION || context.schedulingPolicy !== 'required' || config.evidenceVersion !== EVIDENCE_VERSION || config.schedulingPolicy !== 'required' || context.version !== 1 || context.materialOwner !== 'caller' ||
-        ['base', 'head', 'manifestPath', 'repositoryRoot', 'manifestHash', 'patchHash'].some(key => context[key] !== config[key]) ||
+        ['workerCapacity', 'base', 'head', 'manifestPath', 'repositoryRoot', 'manifestHash', 'patchHash'].some(key => context[key] !== config[key]) ||
         canonical(context.trustedSkill) !== canonical(join(root, 'skill/SKILL.md')) ||
         canonical(context.outputDirectory) !== canonical(join(root, 'runtime-tmp'))) throw new Error('invalid CI context')
     if (operation === 'read-skill') {

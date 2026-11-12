@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Trusted prebuilt review context v1",
   "type": "object",
-  "required": ["version", "evidenceVersion", "schedulingPolicy", "repositoryRoot", "manifestPath", "base", "head", "trustedSkill", "outputDirectory", "materialOwner", "manifestHash", "patchHash"],
+  "required": ["version", "evidenceVersion", "schedulingPolicy", "workerCapacity", "repositoryRoot", "manifestPath", "base", "head", "trustedSkill", "outputDirectory", "materialOwner", "manifestHash", "patchHash"],
   "properties": {
     "version": { "const": 1 },
     "evidenceVersion": { "const": 2 },
     "schedulingPolicy": { "const": "required" },
+    "workerCapacity": { "type": "integer", "minimum": 1, "maximum": 6 },
     "repositoryRoot": { "type": "string", "minLength": 1 },
     "manifestPath": { "type": "string", "minLength": 1 },
     "trustedSkill": { "type": "string", "minLength": 1 },

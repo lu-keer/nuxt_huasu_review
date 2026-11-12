@@ -1,7 +1,7 @@
 // Shared synthetic evidence builder for integration tests; not a cloud attestation.
 export const contract = { evidenceVersion: 2, cli: '0.167.1', source: 'config/read', status: 'PASS', workerCapacity: 2, primaryIncluded: false }
 export function strictFixture(config, events, rules) {
-  Object.assign(config, { evidenceVersion: 2, schedulingPolicy: 'required', cli: '0.167.1', effort: 'low' })
+  Object.assign(config, { evidenceVersion: 2, schedulingPolicy: 'required', workerCapacity: 2, cli: '0.167.1', effort: 'low' })
   const stamp = n => new Date(Date.UTC(2026, 10, 11, 1, 0, 0) + n * 1000).toISOString()
   for (const [i, rule] of rules.entries()) {
     const start = Math.floor(i / 2) * 20 + i % 2

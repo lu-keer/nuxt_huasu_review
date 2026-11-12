@@ -1,6 +1,6 @@
 // Runtime evidence only: never infer capacity or tool returns from model prose.
 export const EVIDENCE_VERSION = 2
-export const WORKER_CAPACITY = 2
+export const WORKER_CAPACITY = 6
 export const RULE_IDS = ['standards', 'architect', 'devops', 'product_contract', 'runtime_performance', 'security']
 const terminal = new Set(['completed', 'interrupted', 'errored', 'shutdown', 'cancelled'])
 const time = event => Date.parse(event?.timestamp)
@@ -11,7 +11,8 @@ export function assessScheduling(events, config, contract, rules = RULE_IDS) {
   const fail = (code, event) => { if (!violations.includes(code)) violations.push(code); if (event) refs.push({ thread: event.thread, call_id: event.call_id, timestamp: event.timestamp, order: event.order }) }
   const configured = config.evidenceVersion === EVIDENCE_VERSION && config.schedulingPolicy === 'required'
   const capacityVerified = contract?.status === 'PASS' && contract.cli === config.cli && contract.source === 'config/read' &&
-    contract.workerCapacity === WORKER_CAPACITY && contract.primaryIncluded === false && contract.evidenceVersion === EVIDENCE_VERSION
+    Number.isSafeInteger(config.workerCapacity) && config.workerCapacity > 0 && config.workerCapacity <= RULE_IDS.length &&
+    contract.workerCapacity === config.workerCapacity && contract.primaryIncluded === false && contract.evidenceVersion === EVIDENCE_VERSION
   if (!configured) unknown('STRICT_POLICY_MISSING')
   if (!capacityVerified) unknown('CAPACITY_UNVERIFIED')
   const roots = events.filter(e => e.type === 'session_meta' && !e.parent)

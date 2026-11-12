@@ -66,7 +66,7 @@ export function prepare(root, mode, skill = defaultSkill) {
   const delivery = Array.from({ length: 700 }, (_, i) => `capability-delivery-line-${String(i).padStart(4, '0')}\n`).join('')
   writeFileSync(join(root, 'delivery-input.txt'), delivery)
   save(join(root, 'public/config.json'), {
-    mode, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: mode === 'prepared' ? 'temp-write-only' : 'read-only',
+    mode, evidenceVersion: EVIDENCE_VERSION, schedulingPolicy: 'required', workerCapacity: WORKER_CAPACITY, cli: CLI_VERSION, action: ACTION_SHA, model: 'gpt-6.1-sol', effort: 'low', sandbox: mode === 'prepared' ? 'temp-write-only' : 'read-only',
     safety: 'drop-sudo', endpoint: 'https://gptapi001.huasu.org/v1/responses',
     commit: process.env.GITHUB_SHA ?? 'local', base, root, manifestPath,
     run: process.env.GITHUB_RUN_ID ?? 'local', attempt: process.env.GITHUB_RUN_ATTEMPT ?? 'local',

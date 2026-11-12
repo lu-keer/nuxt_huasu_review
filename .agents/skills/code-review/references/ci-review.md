@@ -11,11 +11,13 @@
 - 保留原生任务身份，查询实际状态和确认停止。宿主耗时缺失写“不可用”，不估算。主会话核查候选，合并重复、剔除无效候选，保留实际核查结果。
 - 最终六路结束后显式调用 list_agents；早期任务退出列表时，真实子会话完成事件仍可作为证据。不用模型自行陈述代替运行时证据。
 
-- 本次为严格调度验收，可信准备固定两个 worker 名额（不含主会话）；不得传 model 或 reasoning_effort，必须显式 fork_turns: "none"。先提交全部当前可启动任务，只有名额满额或提交调用尚未返回时才等待；确认任务停止后立即提交 pending 任务。快速任务自然完成不要求人为延长运行。不得以少量区间重叠宣称调度通过；可信校验器独立核验请求、返回、容量和实际配置，证据不足则整体未完成。
-- 调度队列固定 standards、architect、devops、product_contract、runtime_performance、security。维护 active 名单：首先连续提交两个 spawn，不在其中插入状态查询；收到宿主完成事件就立即移出 active 并提交下一 pending，不先调用 list_agents 或 wait_agent 再确认一次。只有 active 已满两个且当前没有已知完成事件时才查询/等待。任务自然完成是补位机会，不是提前等待的理由。全部六路提交后再按预算等待收尾。
+- 本次为严格调度验收，可信准备固定六个 worker 名额（不含主会话）；不得传 model 或 reasoning_effort，必须显式 fork_turns: "none"。先提交全部当前可启动任务，只有名额满额或提交调用尚未返回时才等待；确认任务停止后立即提交 pending 任务。快速任务自然完成不要求人为延长运行。不得以少量区间重叠宣称调度通过；可信校验器独立核验请求、返回、容量和实际配置，证据不足则整体未完成。
+- 调度队列固定 standards、architect、devops、product_contract、runtime_performance、security。维护 active 名单：首先连续提交六个 spawn，不在其中插入状态查询；收到宿主完成事件就立即移出 active 并提交下一 pending，不先调用 list_agents 或 wait_agent 再确认一次。只有 active 已满六个且当前没有已知完成事件时才查询/等待。任务自然完成是补位机会，不是提前等待的理由。全部六路提交后再按预算等待收尾。
 
-提交前一次拟定六条完整任务消息（各自材料入口、规则、边界和输出约定均齐全），不要在 spawn 之间才组织下一条消息或分析已经返回的 finding。调度阶段每次工具返回先处理已到达的完成通知：若 pending 非空且 active 少于二，下一次原生调用必须是 spawn_agent；仅 active 满二才 wait_agent。wait_agent 返回后不要再 list_agents，先按已到达的通知补位；即使消息只有“completed”而没有 finding 正文，也已经释放名额。finding 核查统一在六条任务全部提交后进行。真实任务失败时不重试，保留未完成状态。
+提交前一次拟定六条完整任务消息（各自材料入口、规则、边界和输出约定均齐全），不要在 spawn 之间才组织下一条消息或分析已经返回的 finding。调度阶段每次工具返回先处理已到达的完成通知：若 pending 非空且 active 少于六，下一次原生调用必须是 spawn_agent；仅 active 满六才 wait_agent。wait_agent 返回后不要再 list_agents，先按已到达的通知补位；即使消息只有“completed”而没有 finding 正文，也已经释放名额。finding 核查统一在六条任务全部提交后进行。真实任务失败时不重试，保留未完成状态。
 
 最终消息仅为符合 schema 的 JSON：status 为 complete 或 incomplete；report 为 SKILL 的完整中文 Standards、AI Review Rules、Summary 报告，不截断；tasks 列出实际 rule、agent（原生身份或路径）、status；findings 只包含核实保留的 finding（严重程度、文件、行号、标题、关键代码、触发条件、影响）。报告包含剔除/合并数量、所有必要任务完成情况和材料保留情况。不输出评分、默认修复或通用保证。
 
 只要任一必要任务、核查或报告未完成，status 必须为 incomplete；仍报告已核实 findings。有效 findings 不代表执行失败。能力不足时不启动新 codex 进程或替代执行器。
+
+本次有效容量经可信预检确认为六。对六路首轮或每组六个控制任务，必须先完成全部六次 spawn_agent 调用，再调用任何 wait_agent/list_agents；即使较早任务已完成也继续提交，不停下来收取结果。不要求六个执行区间重叠，不人为延长规则任务。
