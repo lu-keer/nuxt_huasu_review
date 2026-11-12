@@ -2,7 +2,7 @@
 
 ## 实际 PR 验收（2026-11-12）
 
-PR #10 已转为 ready，用于接受旧 base 的常规代码审查；发布前严格能力与完整 prepared 演练现已通过；合入后仍需复验 main 作为可信 base。新增临时 PR #11/#12/#13，base 均为实现分支，不合入 fixture 或故障注入。该方式提前验证可信 base 导出，不能冒充合入 main 后的新 base 验收。
+PR #10 已于 2026-11-12 合入 main，合入提交 `26561b81eba62ac5af0750e729de8ad4f6a78e99`。最新旧 base 常规审查 [43135366341](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135366341) 六路完成、0 findings；它不是新严格门槛验收。发布前严格能力和完整 prepared 演练已通过，以下另行记录 main 作为可信 base 的结果。新增临时 PR #11/#12/#13，base 均为实现分支，不合入 fixture 或故障注入。该方式提前验证可信 base 导出，不能冒充合入 main 后的新 base 验收。
 
 已在固定 CLI `0.167.1` 的实际 `config/read` 验证六个有效 worker 名额（不含主会话），可信 config/context 记录 workerCapacity 并与运行时证据匹配。首轮六次原生提交完成后才等待；快速任务无需人为保持。按容量判定仍支持两名额分组排队且已有回归测试；没有放宽证据缺失、提前等待或配置覆盖门槛。
 
@@ -21,6 +21,26 @@ PR #10 已转为 ready，用于接受旧 base 的常规代码审查；发布前�
 能力 artifact：[完整报告](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13907396252)、[probe 证据](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13906682014)、[prepared 证据](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43132964708/artifacts/13907530752)。本地使用最终校验器重算三个真实 PR artifact，结果与云端一致。
 
 本地针对性测试现为 55 项通过，新增六名额下提前等待失败及容量不匹配未验证用例；固定 CLI 的真实无模型查询、actionlint 与 git diff 检查通过。上述小型样本不证明与改造前本地审查全面等价。
+
+## main 可信 base 的发布后验收
+
+固定 base：`26561b81eba62ac5af0750e729de8ad4f6a78e99`，包含完整严格实现。创建全新普通代码 PR #14、受控缺证据 PR #15，以及本验收文档 PR 的零文本路径；它们均从该 main 出发，不使用 head 中的校验器。
+
+已完整下载并核对三个运行的白名单 events、config、result、完整 report 与实际 PR 评论，全部符合预期：
+
+| 路径 | PR / Actions | 固定 head | 实际结果与 artifact |
+| --- | --- | --- | --- |
+| 普通代码 | [#14](https://github.com/lu-keer/nuxt_huasu_review/pull/14) / [43135907351](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135907351) | `cc3325db3495a1e35d29533192cadf5779b56917` | complete / PASS，六路 completed、0 findings，六名额；[report](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135907351/artifacts/13907945667)、[evidence](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135907351/artifacts/13907063101) |
+| 零文本（验收文档） | [#16](https://github.com/lu-keer/nuxt_huasu_review/pull/16) / [43136040942](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43136040942) | `89bbea084c870349ed1e8183df9cc1617a4a3858` | complete / NOT_APPLICABLE，workers=[]、outcome=skipped；[report](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43136040942/artifacts/13907312952) |
+| 缺少 spawn 返回 | [#15](https://github.com/lu-keer/nuxt_huasu_review/pull/15) / [43135971797](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135971797) | `3c1464087381fb2ae86f9317b3d6170def7631ed` | incomplete / UNVERIFIED；execute success、review failure、comment success；保留 1 Major + 1 Minor；[report](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135971797/artifacts/13906999553)、[evidence](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135971797/artifacts/13907592051) |
+
+普通路径六次提交返回齐全，最后 spawn order 78、首次查询 order 86，实际最大并发 2；规则、完整材料和实际 model/effort 一致且全部输出有效。缺证据路径实际 spawn 返回数为零，原因固定为 SPAWN_RETURN_UNVERIFIED、ROSTER_UNVERIFIED，未用 completed 任务或少量重叠替代提交证据。其 Major 指故意加入的删除证据步骤，Minor 指 sum([]) 缺初始值；两者都只在不可合入的测试分支。模型对同类样本的严重程度/候选集合可能变化，不据这些样本宣称逐条 findings 与历史本地结果完全等价。
+
+取消保护额外观测：[43135086320](https://github.com/lu-keer/nuxt_huasu_review/actions/runs/43135086320) 的 execute cancelled、review/comment skipped；PR #10 的实际评论最终对应最新 a507226，而非被取消的旧 head。本轮没有重新强制制造过期发布，原有旧 run/attempt/head 保护回归测试继续通过；不将本次未重复的云端场景标为新验收。
+
+临时验收 PR #11/#12/#13/#14/#15 均仅保留测试历史，不合入任何 fixture 或故障注入。PR #16 仅更新真实记录，验证零文本路径后合入文档。发布验收完成，不恢复本地自动审查，不升级 CLI，不改写 PR #9 历史结果。
+
+发布回退使用 `git revert 26561b81eba62ac5af0750e729de8ad4f6a78e99` 明确恢复上一版本，不修改历史 PR #9 报告。上一版本的任意两路重叠门槛不能证明按容量调度，回退时必须保留这一限制说明。普通代码及缺证据 fixture 均不得合入 main。
 
 ## 前置验收结论（历史，2026-11-11）
 
